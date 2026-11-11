@@ -88,13 +88,25 @@ function checkTruthReceipt() {
     process.exit(1);
   }
 
-  // 5. Verify cryptographic signature integrity
-  if (receipt.signature) {
-    const signatureData = `${receipt.project_id}:${receipt.plan_hash}:${receipt.timestamp}:${(receipt.cited_fact_ids || []).slice().sort().join(',')}`;
+  // 5. Verify cryptographic signature integrity using constant-time comparison
+  if (receipt.signature && typeof receipt.signature === 'string') {
+    const citedSorted = Array.isArray(receipt.cited_fact_ids)
+      ? receipt.cited_fact_ids.slice().sort().join(',')
+      : '';
+    const signatureData = `${receipt.project_id}:${receipt.plan_hash}:${receipt.timestamp}:${citedSorted}`;
     const expectedSig = crypto.createHmac('sha256', GEMINI_API_KEY).update(signatureData).digest('hex');
 
-    if (receipt.signature !== expectedSig && !receipt.receipt_token?.startsWith('TG-VERIFIED-LOCAL-')) {
-      console.warn('⚠️ [TRUTH GUARD] Warning: Receipt signature verification note: signature generated with different key.');
+    let isValidSig = false;
+    try {
+      const sigBuf = Buffer.from(receipt.signature, 'hex');
+      const expBuf = Buffer.from(expectedSig, 'hex');
+      if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+        isValidSig = true;
+      }
+    } catch {}
+
+    if (!isValidSig && !receipt.receipt_token?.startsWith('TG-VERIFIED-LOCAL-')) {
+      console.warn('⚠️ [TRUTH GUARD] Warning: Receipt signature verification note: signature mismatch.');
     }
   }
 

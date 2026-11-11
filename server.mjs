@@ -884,7 +884,26 @@ export async function upsertRule({ scope = 'project', file_path, section_title, 
   const currentProjectId = detectProjectId();
   const projectId = scope === 'global' ? 'global' : currentProjectId;
   const rootDir = scope === 'global' ? GLOBAL_RULES_DIR : process.cwd();
+
+  // 1. Path traversal guard
   const targetFile = path.resolve(rootDir, file_path);
+  const rel = path.relative(rootDir, targetFile);
+  if (rel.startsWith('..') || path.isAbsolute(file_path)) {
+    throw new Error('Access denied: Path traversal detected. file_path must reside within the root directory.');
+  }
+
+  // 2. Sensitive path & file shield
+  const normalized = rel.replace(/\\/g, '/').toLowerCase();
+  const forbiddenPatterns = ['.git/', '.env', 'node_modules/', '.ssh/', 'quota-tracker', 'package.json'];
+  if (forbiddenPatterns.some(pattern => normalized.includes(pattern))) {
+    throw new Error('Access denied: Modifying sensitive system, configuration, or environment files is strictly prohibited.');
+  }
+
+  // 3. Allowed file extensions guard (.md, .ts)
+  const allowedExts = ['.md', '.ts'];
+  if (!allowedExts.includes(path.extname(targetFile).toLowerCase())) {
+    throw new Error('Access denied: Only Markdown (.md) or TypeScript (.ts) specification files can be modified.');
+  }
 
   const parentDir = path.dirname(targetFile);
   if (!fs.existsSync(parentDir)) {
@@ -996,9 +1015,9 @@ export function createTruthGuardServer() {
     'truth_search',
     'RAM mirror semantic search for ground-truth rules, architecture specs, and schema contracts (0 Firestore reads)',
     {
-      query: z.string().describe('Search query describing the feature, rule, or schema to look up'),
+      query: z.string().min(1).max(2000).describe('Search query describing the feature, rule, or schema to look up'),
       include_global: z.boolean().default(true).optional().describe('Whether to also search the global rules catalog'),
-      target_project: z.string().optional().describe('Optional specific project_id to search instead of current project')
+      target_project: z.string().max(100).optional().describe('Optional specific project_id to search instead of current project')
     },
     async ({ query, include_global = true, target_project }) => {
       const results = await searchTruth({ query, include_global, target_project });
@@ -1012,8 +1031,8 @@ export function createTruthGuardServer() {
     'truth_verify_plan',
     'Anti-hallucination verification gate: checks proposed plan against ground truth facts using multi-tier LLM engine',
     {
-      proposed_plan: z.string().describe('The proposed technical plan, architecture changes, or code implementation details'),
-      cited_fact_ids: z.array(z.string()).describe('Array of fact_id references retrieved from truth_search')
+      proposed_plan: z.string().min(1).max(50000).describe('The proposed technical plan, architecture changes, or code implementation details'),
+      cited_fact_ids: z.array(z.string().max(250)).max(100).describe('Array of fact_id references retrieved from truth_search')
     },
     async ({ proposed_plan, cited_fact_ids }) => {
       const verification = await verifyPlan({ proposed_plan, cited_fact_ids });
@@ -1028,9 +1047,9 @@ export function createTruthGuardServer() {
     'Create or update a ground-truth rule or spec both locally on disk, in RAM mirror, and in Firestore',
     {
       scope: z.enum(['project', 'global']).default('project').describe('Scope of the rule: project or global'),
-      file_path: z.string().describe('Relative file path to markdown rule file (e.g. docs/RULES.md)'),
-      section_title: z.string().describe('Title of the rule section'),
-      content: z.string().describe('Content of the rule')
+      file_path: z.string().min(1).max(500).describe('Relative file path to markdown rule file (e.g. docs/RULES.md)'),
+      section_title: z.string().min(1).max(200).describe('Title of the rule section'),
+      content: z.string().min(1).max(50000).describe('Content of the rule')
     },
     async ({ scope = 'project', file_path, section_title, content }) => {
       const result = await upsertRule({ scope, file_path, section_title, content });
@@ -1044,7 +1063,7 @@ export function createTruthGuardServer() {
     'truth_status',
     'Get operational status of antigravity-truth-guard: tier, RAM mirror count, circuit breaker, and quota usage',
     {
-      target_project: z.string().optional().describe('Optional specific project_id to view status for')
+      target_project: z.string().max(100).optional().describe('Optional specific project_id to view status for')
     },
     async ({ target_project }) => {
       const status = await getTruthStatus(target_project);
