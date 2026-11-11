@@ -19,6 +19,7 @@
 6. [Інструменти MCP (MCP Tools)](#-інструменти-mcp-mcp-tools)
 7. [Швидкий старт та розгортання](#-швидкий-старт-та-розгортання)
 8. [Підключення до Antigravity, Claude, Codex, Cursor](#-підключення-до-antigravity-claude-codex-cursor)
+9. [Готові промпти для ШІ-агентів (Prompts Library)](#-готові-промпти-для-ші-агентів-prompts-library)
 
 ---
 
@@ -240,6 +241,41 @@ args = ["/абсолютний/шлях/до/antigravity-truth-guard/server.mjs"
 }
 ```
 Тепер жоден ШІ-агент не зможе зафіксувати код або пройти тести, якщо попередньо не отримав позитивний висновок від `truth_verify_plan`!
+
+---
+
+## 🤖 Готові промпти для ШІ-агентів (Prompts Library)
+
+Повна бібліотека інструкцій міститься у файлі [**`PROMPTS.md`**](PROMPTS.md). Нижче наведено два основні готові промпти, які ви можете скопіювати і вставити у ваш ШІ-асистент.
+
+### 1. Промпт для автономного розгортання Truth Guard під ключ:
+> Скопіюйте цей промпт та віддайте агенту (Antigravity, Claude, Codex, Cursor), щоб він сам налаштував MCP-сервер, Google Cloud та Free Tier ключ:
+
+```markdown
+Твоя задача — повністю автономно розгорнути та підключити глобальну мультипроєктну антигалюциногенну MCP-систему `antigravity-truth-guard`, яка працює на безкоштовних лімітах (Firestore Free Tier + Google AI Studio Free Tier до 1500 запитів/добу).
+
+Виконай усі кроки послідовно через консоль і файлову систему:
+1. Підготуй Google Cloud: увімкни `firestore.googleapis.com` та `generativelanguage.googleapis.com`, створи базу Firestore `(default)` та векторний композитний індекс для `truth_chunks` на поле `embedding` (768d, COSINE/FLAT) за `project_id`.
+2. Отримай безкоштовний ключ Gemini API та збережи у `.env` (із fallback на Application Default Credentials).
+3. Встанови залежності (`npm install`) у директорії `antigravity-truth-guard`.
+4. Зареєструй MCP-сервер у конфігураціях моїх агентів (`~/.gemini/config/mcp_config.json`, `~/.claude/claude.json`, `~/.codex/config.toml`).
+5. Запусти `node self-test.mjs` та виведи фінальний звіт готовності.
+```
+
+### 2. Промпт для впровадження обов'язкової верифікації у вашому робочому проекті:
+> Скопіюйте цей промпт та віддайте агенту всередині вашого проекту (наприклад, бекенду чи веб-сервісу), щоб увімкнути захисний шлюз:
+
+```markdown
+Твоя задача — інтегрувати захисний шлюз верифікації Antigravity Truth Guard у цей проєкт:
+1. Додай обов'язковий протокол до інструкцій агента (`AGENTS.md` або `.agent/rules/`):
+   - Закон 1 (Grounded Context): Заборонено здогадуватися про архітектуру чи схеми даних. Перед початком задачі обов'язково викликати `truth_search`.
+   - Закон 2 (Truth Verify Gate): Перед редагуванням коду обов'язково викликати `truth_verify_plan` з планом та `cited_fact_ids`. При `approved: false` — негайно зупинитися і виправити порушення.
+   - Закон 3 (Spec Immutability): Заборонено самовільно змінювати файли специфікацій.
+2. Скопіюй перевіряльник `check-receipt.mjs` у `scripts/check-receipt.mjs`.
+3. Додай виклик `node scripts/check-receipt.mjs` на початок скрипту `"verify"` у `package.json`:
+   `"verify": "node scripts/check-receipt.mjs && tsc --noEmit && npm test"`
+4. Переконайся, що за наявності незакомічених змін у `src/` скрипт вимагає свіжу цифрову квитанцію `.git/.truth-receipt.json`, видану аудитором.
+```
 
 ---
 
