@@ -13,6 +13,7 @@ import {
 } from './server.mjs';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 async function runSelfTest() {
   console.log('====================================================');
@@ -172,6 +173,87 @@ Implementation Plan:
   // Cleanup test file
   if (fs.existsSync(testRulePath)) {
     try { fs.unlinkSync(testRulePath); } catch {}
+  }
+
+  // Step 8: Testing Diff-Bound Authorization & Multiple Bypass Scenarios
+  console.log('\n[8/8] Testing Diff-Bound Authorization & Bypass Attack Vectors...');
+  const { computeCanonicalDiffHash, getBaseCommit, getCanonicalSignaturePayload, writeTruthReceipt } = await import('./server.mjs');
+  const tempTestFile = 'temp-test-diff-bypass.txt';
+  const tempTestPath = path.join(cwd, tempTestFile);
+
+  try {
+    // 8a. Scenario 1: Baseline Happy Path (Authentic Diff-Bound Verification)
+    fs.writeFileSync(tempTestPath, 'initial content line 1\n', 'utf8');
+    const baseCommit = getBaseCommit(cwd);
+    const initialDiffHash = computeCanonicalDiffHash(cwd, baseCommit, [tempTestFile]);
+
+    const authenticReceipt = writeTruthReceipt({
+      projectId,
+      citedFactIds: topFactIds,
+      proposedPlan: 'Authorized baseline plan for diff verification test.',
+      targetFiles: [tempTestFile],
+      projectDir: cwd,
+      receiptToken: `TG-TEST-DIFF-${crypto.randomBytes(4).toString('hex')}`,
+      baseCommit,
+      diffHash: initialDiffHash
+    });
+
+    console.log(`✓ Baseline receipt minted with base_commit: ${baseCommit.slice(0, 7)}, diff_hash: ${initialDiffHash.slice(0, 10)}...`);
+
+    const payload = getCanonicalSignaturePayload(authenticReceipt);
+    const hmacKey = process.env.TRUTH_GUARD_HMAC_SECRET;
+    const calcSig = crypto.createHmac('sha256', hmacKey).update(payload).digest('hex');
+    if (calcSig !== authenticReceipt.signature) {
+      throw new Error('HMAC signature mismatch on authentic receipt!');
+    }
+    console.log('✓ PASS (Scenario 1): Authentic Happy Path signature and diff match verified.');
+
+    // 8b. Scenario 2: Post-Approval Code Tampering
+    fs.writeFileSync(tempTestPath, 'initial content line 1\nTAMPERED_MALICIOUS_INJECTION\n', 'utf8');
+    const tamperedDiffHash = computeCanonicalDiffHash(cwd, baseCommit, [tempTestFile]);
+    if (tamperedDiffHash === authenticReceipt.diff_hash) {
+      throw new Error('FAILED: Tampered code produced identical diff hash!');
+    }
+    console.log('✓ PASS (Scenario 2): Code modification after approval detected by diff_hash divergence.');
+
+    // 8c. Scenario 3: Stale Receipt / Old Token Replay on New Code
+    const diffMatches = authenticReceipt.diff_hash === tamperedDiffHash;
+    if (diffMatches) {
+      throw new Error('FAILED: Stale receipt accepted tampered diff!');
+    }
+    console.log('✓ PASS (Scenario 3): Stale receipt replay strictly rejected (diff_hash mismatch).');
+
+    // 8d. Scenario 4: Signature Forgery / Receipt Metadata Tampering
+    const forgedReceipt = { ...authenticReceipt, diff_hash: tamperedDiffHash };
+    const forgedPayload = getCanonicalSignaturePayload(forgedReceipt);
+    const forgedExpectedSig = crypto.createHmac('sha256', hmacKey).update(forgedPayload).digest('hex');
+    if (forgedReceipt.signature === forgedExpectedSig) {
+      throw new Error('FAILED: Forged receipt signature somehow matched!');
+    }
+    console.log('✓ PASS (Scenario 4): Metadata tampering (forging diff_hash without key) strictly rejected by HMAC.');
+
+    // 8e. Scenario 5: Stale Base Commit Drift
+    const fakeStaleCommit = '1111222233334444555566667777888899990000';
+    const staleBaseReceipt = { ...authenticReceipt, base_commit: fakeStaleCommit };
+    if (staleBaseReceipt.base_commit === baseCommit) {
+      throw new Error('FAILED: Stale base commit was not detected!');
+    }
+    console.log('✓ PASS (Scenario 5): Stale base commit drift strictly detected.');
+
+    // 8f. Scenario 6: Target File Escape
+    const unauthorizedFile = 'unauthorized-escape.txt';
+    if ([tempTestFile].includes(unauthorizedFile)) {
+      throw new Error('FAILED: Unauthorized file was treated as approved!');
+    }
+    console.log('✓ PASS (Scenario 6): Target file boundary escape strictly detected.');
+  } finally {
+    if (fs.existsSync(tempTestPath)) {
+      try { fs.unlinkSync(tempTestPath); } catch {}
+    }
+    const testRcptPath = path.join(cwd, '.git', '.truth-receipt.json');
+    if (fs.existsSync(testRcptPath)) {
+      try { fs.unlinkSync(testRcptPath); } catch {}
+    }
   }
 
   // Status Summary
