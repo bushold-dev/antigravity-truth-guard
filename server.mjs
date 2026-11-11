@@ -84,33 +84,85 @@ export function getRecentActivities(maxLines = 10) {
   }
 }
 
-// Quota & Tier Manager
-export function getQuotaTracker() {
-  const today = new Date().toISOString().slice(0, 10);
-  let data = {
-    date: today,
-    free_tier_used: 0,
-    payg_tier_used: 0,
-    total_used: 0,
-    circuit_breaker_tripped: false
-  };
+// Atomic Inter-Process Quota Lock
+export function withQuotaLock(fn) {
+  const lockFile = QUOTA_FILE + '.lock';
+  const start = Date.now();
+  let fd = null;
 
-  if (fs.existsSync(QUOTA_FILE)) {
+  while (!fd) {
     try {
-      const parsed = JSON.parse(fs.readFileSync(QUOTA_FILE, 'utf8'));
-      if (parsed.date === today) {
-        data = {
-          date: today,
-          free_tier_used: parsed.free_tier_used ?? parsed.used ?? 0,
-          payg_tier_used: parsed.payg_tier_used ?? 0,
-          total_used: parsed.total_used ?? parsed.used ?? 0,
-          circuit_breaker_tripped: Boolean(parsed.circuit_breaker_tripped)
-        };
+      fd = fs.openSync(lockFile, 'wx');
+    } catch (err) {
+      if (err.code === 'EEXIST') {
+        try {
+          const stats = fs.statSync(lockFile);
+          if (Date.now() - stats.mtimeMs > 5000) {
+            fs.unlinkSync(lockFile);
+            continue;
+          }
+        } catch {}
+        if (Date.now() - start > 4000) {
+          break; // proceed defensively if lock times out
+        }
+        const sleepUntil = Date.now() + 30;
+        while (Date.now() < sleepUntil) {}
+      } else {
+        break;
       }
-    } catch {}
+    }
   }
 
+  try {
+    return fn();
+  } finally {
+    if (fd) {
+      try {
+        fs.closeSync(fd);
+        fs.unlinkSync(lockFile);
+      } catch {}
+    }
+  }
+}
+
+// Quota & Tier Manager with Inter-Process Concurrency Protection
+export function getQuotaTracker() {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const readData = () => {
+    let data = {
+      date: today,
+      free_tier_used: 0,
+      payg_tier_used: 0,
+      total_used: 0,
+      circuit_breaker_tripped: false
+    };
+
+    if (fs.existsSync(QUOTA_FILE)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(QUOTA_FILE, 'utf8'));
+        if (parsed.date === today) {
+          data = {
+            date: today,
+            free_tier_used: parsed.free_tier_used ?? parsed.used ?? 0,
+            payg_tier_used: parsed.payg_tier_used ?? 0,
+            total_used: parsed.total_used ?? parsed.used ?? 0,
+            circuit_breaker_tripped: Boolean(parsed.circuit_breaker_tripped)
+          };
+        }
+      } catch {}
+    }
+    return data;
+  };
+
+  const saveData = (data) => {
+    try {
+      fs.writeFileSync(QUOTA_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch {}
+  };
+
   const getTier = () => {
+    const data = readData();
     if (data.circuit_breaker_tripped || data.total_used >= CIRCUIT_BREAKER_HARD_CAP) {
       return 'LOCAL_FALLBACK';
     }
@@ -120,55 +172,61 @@ export function getQuotaTracker() {
     return 'CLOUD_FREE';
   };
 
-  const save = () => {
-    try {
-      fs.writeFileSync(QUOTA_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch {}
-  };
-
   return {
     getTier,
-    getTotalUsed: () => data.total_used,
-    getFreeUsed: () => data.free_tier_used,
-    getPaygUsed: () => data.payg_tier_used,
-    isCircuitBreakerTripped: () => data.circuit_breaker_tripped || data.total_used >= CIRCUIT_BREAKER_HARD_CAP,
+    getTotalUsed: () => readData().total_used,
+    getFreeUsed: () => readData().free_tier_used,
+    getPaygUsed: () => readData().payg_tier_used,
+    isCircuitBreakerTripped: () => {
+      const data = readData();
+      return data.circuit_breaker_tripped || data.total_used >= CIRCUIT_BREAKER_HARD_CAP;
+    },
     recordUsage: (count = 1) => {
-      data.total_used += count;
-      if (data.total_used <= FREE_TIER_DAILY_LIMIT) {
-        data.free_tier_used += count;
-      } else {
-        data.payg_tier_used += count;
-      }
+      return withQuotaLock(() => {
+        const data = readData();
+        data.total_used += count;
+        if (data.total_used <= FREE_TIER_DAILY_LIMIT) {
+          data.free_tier_used += count;
+        } else {
+          data.payg_tier_used += count;
+        }
 
-      if (data.total_used >= CIRCUIT_BREAKER_HARD_CAP && !data.circuit_breaker_tripped) {
-        data.circuit_breaker_tripped = true;
-        logActivity('CIRCUIT_BREAKER_TRIPPED', {
-          total_used: data.total_used,
-          reason: `Exceeded hard cap of ${CIRCUIT_BREAKER_HARD_CAP} calls/day. Forced LOCAL_FALLBACK_MODE.`
-        });
-        console.error(`[truth-guard] CRITICAL: Hard cap of ${CIRCUIT_BREAKER_HARD_CAP} calls reached! Tripping circuit breaker.`);
-      }
-      save();
+        if (data.total_used >= CIRCUIT_BREAKER_HARD_CAP && !data.circuit_breaker_tripped) {
+          data.circuit_breaker_tripped = true;
+          logActivity('CIRCUIT_BREAKER_TRIPPED', {
+            total_used: data.total_used,
+            reason: `Exceeded hard cap of ${CIRCUIT_BREAKER_HARD_CAP} calls/day. Forced LOCAL_FALLBACK_MODE.`
+          });
+          console.error(`[truth-guard] CRITICAL: Hard cap of ${CIRCUIT_BREAKER_HARD_CAP} calls reached! Tripping circuit breaker.`);
+        }
+        saveData(data);
+      });
     },
     refundUsage: (count = 1) => {
-      data.total_used = Math.max(0, data.total_used - count);
-      if (data.payg_tier_used > 0) {
-        const refundPayg = Math.min(data.payg_tier_used, count);
-        data.payg_tier_used -= refundPayg;
-        count -= refundPayg;
-      }
-      if (count > 0 && data.free_tier_used > 0) {
-        data.free_tier_used = Math.max(0, data.free_tier_used - count);
-      }
-      if (data.total_used < CIRCUIT_BREAKER_HARD_CAP && data.circuit_breaker_tripped) {
-        data.circuit_breaker_tripped = false;
-      }
-      save();
+      return withQuotaLock(() => {
+        const data = readData();
+        data.total_used = Math.max(0, data.total_used - count);
+        if (data.payg_tier_used > 0) {
+          const refundPayg = Math.min(data.payg_tier_used, count);
+          data.payg_tier_used -= refundPayg;
+          count -= refundPayg;
+        }
+        if (count > 0 && data.free_tier_used > 0) {
+          data.free_tier_used = Math.max(0, data.free_tier_used - count);
+        }
+        if (data.total_used < CIRCUIT_BREAKER_HARD_CAP && data.circuit_breaker_tripped) {
+          data.circuit_breaker_tripped = false;
+        }
+        saveData(data);
+      });
     },
     tripCircuitBreaker: (reason) => {
-      data.circuit_breaker_tripped = true;
-      logActivity('CIRCUIT_BREAKER_TRIPPED', { reason });
-      save();
+      return withQuotaLock(() => {
+        const data = readData();
+        data.circuit_breaker_tripped = true;
+        logActivity('CIRCUIT_BREAKER_TRIPPED', { reason });
+        saveData(data);
+      });
     }
   };
 }
@@ -749,10 +807,15 @@ export function writeTruthReceipt({ projectId, citedFactIds, proposedPlan, targe
   const targetSorted = Array.isArray(targetFiles) ? targetFiles.slice().sort().join(',') : '';
 
   const signatureData = targetSorted
-    ? `${projectId}:${planHash}:${targetSorted}:${timestamp}:${citedSorted}`
-    : `${projectId}:${planHash}:${timestamp}:${citedSorted}`;
+    ? `${receiptToken}:${projectId}:${planHash}:${targetSorted}:${timestamp}:${citedSorted}`
+    : `${receiptToken}:${projectId}:${planHash}:${timestamp}:${citedSorted}`;
 
-  const signature = crypto.createHmac('sha256', GEMINI_API_KEY || 'truth-guard-secret').update(signatureData).digest('hex');
+  const hmacKey = process.env.TRUTH_GUARD_HMAC_SECRET || GEMINI_API_KEY;
+  if (!hmacKey) {
+    throw new Error('Truth Guard HMAC secret is not configured. Set TRUTH_GUARD_HMAC_SECRET or GEMINI_API_KEY.');
+  }
+
+  const signature = crypto.createHmac('sha256', hmacKey).update(signatureData).digest('hex');
 
   const receipt = {
     timestamp,
@@ -918,9 +981,7 @@ export async function verifyPlan({
   proposed_plan,
   cited_fact_ids,
   target_files = [],
-  project_dir = null,
-  human_override = false,
-  override_token = null
+  project_dir = null
 }) {
   const currentProjectId = detectProjectId();
 
@@ -1051,67 +1112,26 @@ Strict verification rules:
   }
 
   // Fail-Closed Gate: Local offline mode cannot perform semantic fact verification
-  const expectedOverrideToken = 'OVERRIDE-' + crypto.createHash('sha256').update(`${currentProjectId}:${proposed_plan}`).digest('hex').slice(0, 8);
-  const isHumanAuthorized = human_override === true && override_token === expectedOverrideToken;
-
-  if (!isHumanAuthorized) {
-    const unverifiedToken = `TG-UNVERIFIED-FALLBACK-${crypto.randomBytes(6).toString('hex')}`;
-    logActivity('PLAN_VERIFIED_FALLBACK_BLOCKED', {
-      approved: false,
-      score: 0.0,
-      tier: 'LOCAL_FALLBACK',
-      receipt: unverifiedToken,
-      issues: localIssues
-    });
-
-    return {
-      approved: false,
-      score: 0.0,
-      tier: 'LOCAL_FALLBACK',
-      status: 'UNVERIFIED_FALLBACK',
-      requires_human_override: true,
-      message: 'STOP: Truth Guard is operating in LOCAL_FALLBACK mode (LLM offline or circuit breaker active). Local fallback mode is fail-closed and cannot cryptographically verify plan grounding without human authorization. Present this plan to the human user in chat. Once confirmed, re-run truth_verify_plan with human_override: true and override_token: "' + expectedOverrideToken + '".',
-      override_token: expectedOverrideToken,
-      hallucinations_or_missing_conditions: [
-        'Fail-Closed Fallback: Local offline mode cannot perform semantic fact verification.',
-        ...localIssues
-      ],
-      receipt_token: unverifiedToken
-    };
-  }
-
-  // If human override was explicitly provided and valid:
-  const approved = localIssues.length === 0 && cited_fact_ids.length > 0;
-  const score = approved ? 1.0 : 0.0;
-  const planHash = crypto.createHash('sha256').update(proposed_plan).digest('hex').slice(0, 12);
-  const receiptToken = approved ? `TG-VERIFIED-OVERRIDE-${planHash}` : `TG-REJECTED-OVERRIDE-${crypto.randomBytes(6).toString('hex')}`;
-
-  if (approved) {
-    writeTruthReceipt({
-      projectId: currentProjectId,
-      citedFactIds: cited_fact_ids,
-      proposedPlan: proposed_plan,
-      targetFiles: target_files,
-      projectDir: project_dir,
-      receiptToken
-    });
-  }
-
-  logActivity('PLAN_VERIFIED_LOCAL_OVERRIDE', {
-    approved,
-    score,
-    tier: 'LOCAL_FALLBACK_HUMAN_OVERRIDE',
-    receipt: receiptToken,
+  const unverifiedToken = `TG-UNVERIFIED-FALLBACK-${crypto.randomBytes(6).toString('hex')}`;
+  logActivity('PLAN_VERIFIED_FALLBACK_BLOCKED', {
+    approved: false,
+    score: 0.0,
+    tier: 'LOCAL_FALLBACK',
+    receipt: unverifiedToken,
     issues: localIssues
   });
 
   return {
-    approved,
-    score,
-    tier: 'LOCAL_FALLBACK_HUMAN_OVERRIDE',
-    status: approved ? 'APPROVED_BY_HUMAN_OVERRIDE' : 'REJECTED',
-    hallucinations_or_missing_conditions: localIssues,
-    receipt_token: receiptToken
+    approved: false,
+    score: 0.0,
+    tier: 'LOCAL_FALLBACK',
+    status: 'UNVERIFIED_FALLBACK',
+    message: 'STOP: Truth Guard is operating in LOCAL_FALLBACK mode (LLM offline or circuit breaker active). Local fallback mode is fail-closed and cannot cryptographically verify plan grounding without external AI verification. For emergency bypass by a human operator, run "node scripts/emergency-approve.mjs" in an interactive terminal.',
+    hallucinations_or_missing_conditions: [
+      'Fail-Closed Fallback: Local offline mode cannot perform semantic fact verification without external AI auditor.',
+      ...localIssues
+    ],
+    receipt_token: unverifiedToken
   };
 }
 
@@ -1361,18 +1381,14 @@ export function createTruthGuardServer() {
       proposed_plan: z.string().min(1).max(50000).describe('The proposed technical plan, architecture changes, or code implementation details'),
       cited_fact_ids: z.array(z.string().max(250)).max(100).describe('Array of fact_id references retrieved from truth_search'),
       target_files: z.array(z.string().min(1).max(500)).min(1).max(100).describe('List of file paths intended to be created or modified (mandatory non-empty array)'),
-      project_dir: z.string().max(1000).optional().describe('Optional absolute path to project root directory (must reside in authorized workspace)'),
-      human_override: z.boolean().default(false).optional().describe('Whether human user explicitly authorized fallback verification when offline'),
-      override_token: z.string().optional().describe('Confirmation token provided by truth_verify_plan during fallback mode')
+      project_dir: z.string().max(1000).optional().describe('Optional absolute path to project root directory (must reside in authorized workspace)')
     },
-    async ({ proposed_plan, cited_fact_ids, target_files, project_dir, human_override = false, override_token = null }) => {
+    async ({ proposed_plan, cited_fact_ids, target_files, project_dir }) => {
       const verification = await verifyPlan({
         proposed_plan,
         cited_fact_ids,
         target_files,
-        project_dir,
-        human_override,
-        override_token
+        project_dir
       });
       return {
         content: [{ type: 'text', text: JSON.stringify(verification, null, 2) }]

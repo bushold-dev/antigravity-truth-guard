@@ -79,39 +79,33 @@ Implementation Plan:
     console.log(`✓ PASS: Plan verified successfully! Receipt: ${verifyPass.receipt_token} (Tier: ${verifyPass.tier})`);
   }
 
-  // Step 4: Emergency Safety Circuit Breaker & Fail-Closed Fallback Mode
-  console.log('\n[5/7] Testing Emergency Safety Circuit Breaker & Fail-Closed LOCAL_FALLBACK_MODE...');
+  // Step 4: Emergency Safety Circuit Breaker & Strict Fail-Closed Fallback Mode
+  console.log('\n[5/7] Testing Emergency Safety Circuit Breaker & Strict Fail-Closed LOCAL_FALLBACK_MODE...');
   const tracker = getQuotaTracker();
   tracker.tripCircuitBreaker('Simulation test for circuit breaker activation');
 
-  // 4a: Fallback without human override -> MUST be blocked fail-closed
+  // 4a: Fallback in MCP verifyPlan -> MUST be strictly blocked fail-closed (no self-authorization)
   const fallbackBlocked = await verifyPlan({
     proposed_plan: groundedPlan,
     cited_fact_ids: topFactIds,
     target_files: ['src/domain/core.ts']
   });
 
-  if (fallbackBlocked.approved) {
-    throw new Error('FAILED: Local fallback mode approved plan without human override! Fail-closed violated.');
+  if (fallbackBlocked.approved || fallbackBlocked.status !== 'UNVERIFIED_FALLBACK') {
+    throw new Error('FAILED: Local fallback mode approved plan! Fail-closed invariant violated.');
   }
-  if (!fallbackBlocked.requires_human_override || !fallbackBlocked.override_token) {
-    throw new Error(`Expected requires_human_override and override_token, got: ${JSON.stringify(fallbackBlocked)}`);
-  }
-  console.log('✓ PASS: Fail-Closed Local Fallback correctly blocked ungrounded offline plan!');
+  console.log('✓ PASS: Fail-Closed Local Fallback strictly blocked offline verification (0 self-authorization bypasses).');
 
-  // 4b: Fallback with explicit human override token -> Approved
-  const fallbackApproved = await verifyPlan({
-    proposed_plan: groundedPlan,
-    cited_fact_ids: topFactIds,
-    target_files: ['src/domain/core.ts'],
-    human_override: true,
-    override_token: fallbackBlocked.override_token
-  });
-
-  if (!fallbackApproved.approved || fallbackApproved.tier !== 'LOCAL_FALLBACK_HUMAN_OVERRIDE') {
-    throw new Error(`Expected approved fallback with human override, got: ${JSON.stringify(fallbackApproved)}`);
+  // 4b: Reset circuit breaker to test quota tracking and upsert rules
+  tracker.refundUsage(0); // sync state
+  const quotaFile = path.join(process.env.USERPROFILE || process.env.HOME || '', '.gemini', 'antigravity', 'truth-guard', 'quota-tracker.json');
+  if (fs.existsSync(quotaFile)) {
+    try {
+      const qData = JSON.parse(fs.readFileSync(quotaFile, 'utf8'));
+      qData.circuit_breaker_tripped = false;
+      fs.writeFileSync(quotaFile, JSON.stringify(qData, null, 2), 'utf8');
+    } catch {}
   }
-  console.log('✓ PASS: Emergency Fallback succeeded with explicit human override token.');
 
   // Step 5: Quota Tracker Atomic Pre-Reservation & Refund Test
   console.log('\n[6/7] Testing Atomic Quota Pre-Reservation & Refund...');
