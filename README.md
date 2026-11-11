@@ -152,8 +152,8 @@ The server exposes 4 standard Model Context Protocol (MCP) tools:
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
 | `truth_search` | In-memory semantic & BM25 search (0 database reads) | `query` (search text), `include_global` (boolean) |
-| `truth_verify_plan` | Multi-tier LLM verification gate & receipt generator | `proposed_plan` (string), `cited_fact_ids` (array of strings) |
-| `truth_upsert_rule` | Create or update a spec rule locally and in cloud storage | `scope` (`project`/`global`), `file_path`, `section_title`, `content` |
+| `truth_verify_plan` | Multi-tier LLM verification gate & receipt generator | `proposed_plan`, `cited_fact_ids`, `target_files` (optional), `project_dir` (optional) |
+| `truth_upsert_rule` | Create or update a spec rule (Human-in-the-Loop protected) | `scope`, `file_path`, `section_title`, `content`, `user_confirmed`, `confirmation_token` |
 | `truth_status` | Comprehensive status report: active tier, RAM chunks, circuit breaker | `target_project` (optional) |
 
 ---

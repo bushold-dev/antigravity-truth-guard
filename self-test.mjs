@@ -7,6 +7,7 @@ import {
   seedGlobalRules,
   searchTruth,
   verifyPlan,
+  upsertRule,
   getTruthStatus,
   getQuotaTracker
 } from './server.mjs';
@@ -80,6 +81,45 @@ Implementation Plan:
     throw new Error(`Expected tier to be LOCAL_FALLBACK, got ${fallbackTest.tier}`);
   }
   console.log(`✓ PASS: Emergency Safety Circuit Breaker correctly enforced LOCAL_FALLBACK!`);
+
+  // Step 6: Testing Human-in-the-Loop Spec Protection (truth_upsert_rule)
+  console.log('\n[6/6] Testing Human-in-the-Loop Spec Protection (truth_upsert_rule)...');
+  const testRuleFile = 'test-rule-temp.md';
+  const testRulePath = path.join(cwd, testRuleFile);
+
+  // 6a: Attempt without confirmation -> MUST be blocked
+  const blockedAttempt = await upsertRule({
+    scope: 'project',
+    file_path: testRuleFile,
+    section_title: 'Test Section',
+    content: 'Temporary content for self-test verification.'
+  });
+
+  if (blockedAttempt.status !== 'PENDING_HUMAN_APPROVAL') {
+    throw new Error(`Expected PENDING_HUMAN_APPROVAL, got: ${JSON.stringify(blockedAttempt)}`);
+  }
+  console.log('✓ PASS: Unconfirmed upsertRule correctly blocked with PENDING_HUMAN_APPROVAL!');
+
+  // 6b: Apply with user confirmation token
+  const token = blockedAttempt.proposed_rule.confirmation_token;
+  const approvedAttempt = await upsertRule({
+    scope: 'project',
+    file_path: testRuleFile,
+    section_title: 'Test Section',
+    content: 'Temporary content for self-test verification.',
+    user_confirmed: true,
+    confirmation_token: token
+  });
+
+  if (approvedAttempt.status !== 'APPLIED') {
+    throw new Error(`Expected APPLIED, got: ${JSON.stringify(approvedAttempt)}`);
+  }
+  console.log('✓ PASS: Confirmed upsertRule applied successfully with valid token!');
+
+  // Cleanup test file
+  if (fs.existsSync(testRulePath)) {
+    try { fs.unlinkSync(testRulePath); } catch {}
+  }
 
   // Status Summary
   console.log('\n====================================================');

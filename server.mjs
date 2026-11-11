@@ -936,26 +936,59 @@ Strict verification rules:
   };
 }
 
-export async function upsertRule({ scope = 'project', file_path, section_title, content }) {
+export async function upsertRule({
+  scope = 'project',
+  file_path,
+  section_title,
+  content,
+  user_confirmed = false,
+  confirmation_token = null
+}) {
   const currentProjectId = detectProjectId();
   const projectId = scope === 'global' ? 'global' : currentProjectId;
   const rootDir = scope === 'global' ? GLOBAL_RULES_DIR : process.cwd();
 
-  // 1. Path traversal guard
+  // 1. Human-in-the-Loop Gate (Law 3: Spec Immutability)
+  const isEnvAllowed = process.env.ALLOW_SPEC_MUTATION === 'true';
+  const expectedToken = 'CONFIRM-' + crypto.createHash('sha256').update(`${file_path}:${section_title}:${content}`).digest('hex').slice(0, 8);
+
+  if (!isEnvAllowed && (!user_confirmed || confirmation_token !== expectedToken)) {
+    logActivity('RULE_MUTATION_REQUESTED', {
+      file_path,
+      section_title,
+      scope,
+      token: expectedToken
+    });
+
+    return {
+      status: 'PENDING_HUMAN_APPROVAL',
+      requires_user_approval: true,
+      message: 'STOP: Under Law 3 (Spec Immutability), an AI agent is strictly forbidden from mutating ground truth specifications without explicit human consent. Present this proposed rule change to the human user in chat. Once the user explicitly agrees, call truth_upsert_rule again with user_confirmed: true and confirmation_token: "' + expectedToken + '".',
+      proposed_rule: {
+        scope,
+        file_path,
+        section_title,
+        content_preview: content.slice(0, 500),
+        confirmation_token: expectedToken
+      }
+    };
+  }
+
+  // 2. Path traversal guard
   const targetFile = path.resolve(rootDir, file_path);
   const rel = path.relative(rootDir, targetFile);
   if (rel.startsWith('..') || path.isAbsolute(file_path)) {
     throw new Error('Access denied: Path traversal detected. file_path must reside within the root directory.');
   }
 
-  // 2. Sensitive path & file shield
+  // 3. Sensitive path & file shield
   const normalized = rel.replace(/\\/g, '/').toLowerCase();
   const forbiddenPatterns = ['.git/', '.env', 'node_modules/', '.ssh/', 'quota-tracker', 'package.json'];
   if (forbiddenPatterns.some(pattern => normalized.includes(pattern))) {
     throw new Error('Access denied: Modifying sensitive system, configuration, or environment files is strictly prohibited.');
   }
 
-  // 3. Allowed file extensions guard (.md, .ts)
+  // 4. Allowed file extensions guard (.md, .ts)
   const allowedExts = ['.md', '.ts'];
   if (!allowedExts.includes(path.extname(targetFile).toLowerCase())) {
     throw new Error('Access denied: Only Markdown (.md) or TypeScript (.ts) specification files can be modified.');
@@ -981,10 +1014,11 @@ export async function upsertRule({ scope = 'project', file_path, section_title, 
   const factId = computeFactId(projectId, relPath, section_title);
   const sha256 = crypto.createHash('sha256').update(content).digest('hex');
 
-  logActivity('UPSERT_RULE', { fact_id: factId, project_id: projectId, file: relPath });
+  logActivity('UPSERT_RULE_APPROVED', { fact_id: factId, project_id: projectId, file: relPath, token: expectedToken });
 
   return {
     success: true,
+    status: 'APPLIED',
     fact_id: factId,
     file_path: relPath,
     sha256
@@ -1103,15 +1137,17 @@ export function createTruthGuardServer() {
 
   server.tool(
     'truth_upsert_rule',
-    'Create or update a ground-truth rule or spec both locally on disk, in RAM mirror, and in Firestore',
+    'Create or update a ground-truth rule or spec both locally on disk, in RAM mirror, and in Firestore (requires human confirmation)',
     {
       scope: z.enum(['project', 'global']).default('project').describe('Scope of the rule: project or global'),
       file_path: z.string().min(1).max(500).describe('Relative file path to markdown rule file (e.g. docs/RULES.md)'),
       section_title: z.string().min(1).max(200).describe('Title of the rule section'),
-      content: z.string().min(1).max(50000).describe('Content of the rule')
+      content: z.string().min(1).max(50000).describe('Content of the rule'),
+      user_confirmed: z.boolean().default(false).optional().describe('Must be set to true ONLY AFTER the user has explicitly approved this change in chat'),
+      confirmation_token: z.string().max(64).optional().describe('The confirmation token received during the initial PENDING_HUMAN_APPROVAL step')
     },
-    async ({ scope = 'project', file_path, section_title, content }) => {
-      const result = await upsertRule({ scope, file_path, section_title, content });
+    async ({ scope = 'project', file_path, section_title, content, user_confirmed = false, confirmation_token = null }) => {
+      const result = await upsertRule({ scope, file_path, section_title, content, user_confirmed, confirmation_token });
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
       };

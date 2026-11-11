@@ -151,8 +151,8 @@ Truth Guard має трирівневу систему захисту кошті
 | Інструмент | Опис | Параметри |
 | :--- | :--- | :--- |
 | `truth_search` | Семантичний пошук у RAM-дзеркалі (0 читань з БД) | `query` (текст запиту), `include_global` (чи шукати в глобальних) |
-| `truth_verify_plan` | Суворий аудитор плану з генерацією крипточека | `proposed_plan` (текст плану), `cited_fact_ids` (масив ID фактів) |
-| `truth_upsert_rule` | Створення чи оновлення правила локально і в базі | `scope` (`project`/`global`), `file_path`, `section_title`, `content` |
+| `truth_verify_plan` | Суворий аудитор плану з генерацією крипточека | `proposed_plan`, `cited_fact_ids`, `target_files` (опц.), `project_dir` (опц.) |
+| `truth_upsert_rule` | Створення чи оновлення правила (захищено Human-in-the-Loop) | `scope`, `file_path`, `section_title`, `content`, `user_confirmed`, `confirmation_token` |
 | `truth_status` | Звіт про статус системи, квоти, тариф та запобіжник | `target_project` (опціонально) |
 
 ---
