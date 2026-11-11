@@ -1,186 +1,188 @@
 # 🛡️ Antigravity Truth Guard v2.0
 > **Global Multi-Project Anti-Hallucination MCP Guard for Autonomous AI Coding Agents with Zero-Runaway-Cost Protection**
 
+**English** | [Українська версія (README.uk.md)](README.uk.md)
+
 [![MCP Protocol](https://img.shields.io/badge/MCP-Protocol%20v1.6-blue.svg)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
 [![Google Cloud](https://img.shields.io/badge/Backend-Firestore%20%2B%20Gemini%20API-orange.svg)](https://cloud.google.com)
 
-**Antigravity Truth Guard** — це відкрита автономна система архітектурного нагляду (MCP-сервер), яка гарантує, що сучасні ШІ-агенти (Google Antigravity, Claude Code, OpenAI Codex, Cursor) пишуть код **виключно на основі перевірених фактів та архітектурних контрактів**, не вигадують неіснуючих таблиць у базах даних та не списують зайві кошти з платіжних карток через нескінченні цикли.
+**Antigravity Truth Guard** is an open-source autonomous architectural governance system (MCP server) that guarantees AI coding agents (**Google Antigravity**, **Claude Code**, **OpenAI Codex**, **Cursor**, etc.) write code **strictly grounded in verified facts and architecture contracts**. It eliminates database schema hallucinations, prevents architectural layer contamination, and protects project owners from runaway API costs caused by infinite loops.
 
 ---
 
-## 📖 Зміст
-1. [Проблема: Чому ШІ-агенти "галюцинують"?](#-проблема-чому-ші-агенти-галюцинують)
-2. [Як працює Truth Guard (Пояснення простими словами)](#-як-працює-truth-guard-пояснення-простими-словами)
-3. [Архітектура фінансової безпеки: Захист від перевитрат коштів](#-архітектура-фінансової-безпеки-захист-від-перевитрат-коштів)
-4. [Технічна архітектура системи](#-технічна-архітектура-системи)
-5. [5 Універсальних Інженерних Законів](#-5-універсальних-інженерних-законів)
-6. [Інструменти MCP (MCP Tools)](#-інструменти-mcp-mcp-tools)
-7. [Швидкий старт та розгортання](#-швидкий-старт-та-розгортання)
-8. [Підключення до Antigravity, Claude, Codex, Cursor](#-підключення-до-antigravity-claude-codex-cursor)
-9. [Готові промпти для ШІ-агентів (Prompts Library)](#-готові-промпти-для-ші-агентів-prompts-library)
+## 📖 Table of Contents
+1. [The Problem: Why Do AI Coding Agents Hallucinate?](#-the-problem-why-do-ai-coding-agents-hallucinate)
+2. [How Truth Guard Works (Plain English for Non-Programmers)](#-how-truth-guard-works-plain-english-for-non-programmers)
+3. [Financial Safety Architecture: Zero-Runaway-Cost Protection](#-financial-safety-architecture-zero-runaway-cost-protection)
+4. [Technical Architecture & In-Memory RAM Mirroring](#-technical-architecture--in-memory-ram-mirroring)
+5. [The 5 Universal Engineering Laws](#-the-5-universal-engineering-laws)
+6. [MCP Tools Reference](#-mcp-tools-reference)
+7. [Quickstart & Deployment Guide](#-quickstart--deployment-guide)
+8. [Connecting to Antigravity, Claude, Codex, and Cursor](#-connecting-to-antigravity-claude-codex-and-cursor)
+9. [AI Agent Prompts Library](#-ai-agent-prompts-library)
 
 ---
 
-## 🧩 Проблема: Чому ШІ-агенти "галюцинують"?
+## 🧩 The Problem: Why Do AI Coding Agents Hallucinate?
 
-Сучасні автономні ШІ-агенти володіють величезною швидкістю написання коду, але мають три критичні вразливості у реальних комерційних проектах:
+Autonomous AI coding agents operate with superhuman speed, but in commercial repositories, they exhibit three critical failure modes:
 
-1. **Галюцинації структур даних:** Коли агент не знає точної назви поля в базі або бізнес-правила (наприклад: *«гроші зберігаються виключно в копійках, а не у дробових числах»*), він **вгадує** назву або вигадує власну логіку. Це призводить до падіння продакшену, пошкодження фінансового балансу та прихованих помилок.
-2. **Змішування шарів коду (Хаос архітектури):** Агент намагається в один крок поміняти розрахунок у ядрі програми, додати кнопку в інтерфейс і переписати базу даних. У результаті код стає заплутаним, незрозумілим і непідтримуваним.
-3. **Ризик "фінансової діри" (Runaway Loop):** Якщо агент застряє у нескінченному циклі спроб виправити помилку (особливо вночі без нагляду людини), він може зробити десятки тисяч викликів до платних нейромереж, спричинивши непередбачені витрати.
+1. **Schema & Contract Hallucinations:** When an agent lacks grounded context for a database table or business rule (e.g. *“monetary values must be stored strictly as integer cents, never floating-point numbers”*), it **guesses** or extrapolates. This causes production outages, silent financial drift, and corrupted database states.
+2. **Architectural Cross-Segment Contamination:** An agent often tries in a single prompt to modify calculation formulas in the domain core, add a button to the UI, and alter database schemas simultaneously. The result is tangled spaghetti code that breaks Clean Architecture.
+3. **The "Financial Abyss" (Runaway Agent Loops):** If an agent encounters an unexpected error while operating autonomously (especially overnight), it can trap itself in infinite self-correction loops. It burns tens of thousands of LLM API calls, resulting in unexpected, massive billing charges.
 
 ---
 
-## 🏛️ Як працює Truth Guard (Пояснення простими словами)
+## 🏛️ How Truth Guard Works (Plain English for Non-Programmers)
 
-Уявіть, що ви будуєте будинок, а ШІ-агент — це надшвидка будівельна бригада.
+Imagine you are constructing a high-rise building, and the AI agent is an ultra-fast construction crew.
 
 ```
-       [ Запит користувача: «Зроби нову функцію» ]
-                          │
-                          ▼
-            ┌───────────────────────────┐
-            │   ШІ-Агент розробки       │
-            │   (Claude, Codex, тощо)   │
-            └─────────────┬─────────────┘
-                          │ 1. Складає план робіт
-                          ▼
-        ┌───────────────────────────────────┐
-        │   🛡️ ANTIGRAVITY TRUTH GUARD      │
-        │   (Головний Державний Аудитор)    │
-        └─────────────┬─────────────────────┘
-                      │ 2. Звіряє план із БАЗОЮ ЗАКОНІВ
-         ┌────────────┴────────────┐
-         ▼                         ▼
-   [ План ПОРУШУЄ закон ]    [ План ПОВНІСТЮ ВІДПОВІДАЄ ]
-         │                         │
-         ▼                         ▼
-  ❌ ШТАМП: REJECTED         ✅ ШТАМП: APPROVED
-  Роботи ЗАБЛОКОВАНО!        Видано чек: .truth-receipt.json
-  Агент переробляє план.            │
-                                    ▼
-                             Будівельні роботи
-                             дозволено виконувати!
+          [ User Request: "Build new inventory feature" ]
+                                │
+                                ▼
+                  ┌───────────────────────────┐
+                  │   AI Coding Agent         │
+                  │   (Claude, Codex, etc.)   │
+                  └─────────────┬─────────────┘
+                                │ 1. Drafts technical plan
+                                ▼
+              ┌───────────────────────────────────┐
+              │   🛡️ ANTIGRAVITY TRUTH GUARD      │
+              │   (Chief Compliance Notary)       │
+              └─────────────┬─────────────────────┘
+                            │ 2. Audits against Ground Truth Laws
+             ┌──────────────┴──────────────┐
+             ▼                             ▼
+       [ Plan INVENTED Facts ]       [ Plan 100% GROUNDED ]
+             │                             │
+             ▼                             ▼
+      ❌ STAMP: REJECTED             ✅ STAMP: APPROVED
+      Job site remains locked!       Receipt generated:
+      Agent must fix errors.         .truth-receipt.json
+                                           │
+                                           ▼
+                                     Construction/Code edit
+                                     permitted to execute!
 ```
 
-### Принцип "Нотаріуса та Закону":
-* **Закон (Ground Truth):** Це ваші реальні правила проекту, схеми баз даних та архітектурні інструкції у файлах `.md` та `.schema.ts`. Truth Guard автоматично зчитує їх та індексує у спеціальну захищену пам'ять.
-* **Обов'язковий пошук (`truth_search`):** Агенту суворо заборонено починати кодити навмання. Спочатку він зобов'язаний звернутися до Truth Guard і запитати: *«Які офіційні правила діють для цієї частини проекту?»*.
-* **Шлюз верифікації (`truth_verify_plan`):** Склавши план дій, агент надсилає його до Truth Guard. Система передає план незалежному аудитору (LLM), який перевіряє кожне слово, таблицю і число. Якщо агент спробував вигадати щось від себе — план **відхиляється**, а агент отримує список порушень.
-* **Криптографічний чек-квитанція (`.truth-receipt.json`):** Тільки коли план на 100% чесний, Truth Guard видає цифровий підписаний чек. Якщо агент спробує внести зміни в код без свіжого чека — автоматична система перевірки проекту (`npm run verify`) заблокує компіляцію!
+### The "Notary & Blueprint" Principle:
+* **The Blueprint (Ground Truth):** Your project specifications, schema contracts, and domain rules stored in `.md` and `.schema.ts` files. Truth Guard indexes them into a high-speed knowledge base.
+* **Mandatory Fact-Check (`truth_search`):** The AI agent is strictly forbidden from writing code blind. It must first ask Truth Guard: *“What are the exact, verified rules for this subsystem?”*.
+* **The Independent Verification Gate (`truth_verify_plan`):** Before modifying any code, the agent submits its implementation plan. An independent AI auditor cross-references every single table, column, enum, and arithmetic operation against the Ground Truth facts. If the agent invented anything, the plan is **instantly rejected**.
+* **Cryptographic Verification Receipt (`.truth-receipt.json`):** Only when the plan is 100% faithful does Truth Guard issue a time-stamped, cryptographically signed receipt. The repository verification harness (`npm run verify`) rejects any code compilation or test run if code changes exist without an authentic receipt!
 
 ---
 
-## 💳 Архітектура фінансової безпеки: Захист від перевитрат коштів
+## 💳 Financial Safety Architecture: Zero-Runaway-Cost Protection
 
-Truth Guard має трирівневу систему захисту коштів із функцією **Emergency Circuit Breaker** (автоматичний вимикач, аналогічний до захисного автомата в електрощитку):
+Truth Guard features an automated **Emergency Safety Circuit Breaker**—just like an electrical circuit breaker in your house:
 
 ```
-                       [ Потік щоденних викликів ]
-                                    │
-    ┌───────────────────────────────┴───────────────────────────────┐
-    ▼                               ▼                               ▼
-[ 0 - 1400 викликів ]      [ 1400 - 5000 викликів ]      [ > 5000 викликів (ЗБІЙ) ]
-    │                               │                               │
-    ▼                               ▼                               ▼
- ⭐ TIER 1: FREE TIER        ⚡ TIER 2: PAY-AS-YOU-GO      🚨 TIER 3: CIRCUIT BREAKER
- Безкоштовний ліміт          Резервний платний рівень      АВАРІЙНИЙ СТОП ХМАРИ!
- Google AI Studio            (копійчані витрати,           Всі платні API заблоковані.
- 1500 запитів/день.          не зупиняє розробку).         Перехід у LOCAL_FALLBACK.
- Витрати: $0.00 / день.      Витрати: ~$0.05.              Витрати: $0.00 (100% захист).
+                          [ Daily API Call Stream ]
+                                     │
+      ┌──────────────────────────────┼──────────────────────────────┐
+      ▼                              ▼                              ▼
+  [ Calls 0 - 1,400 ]       [ Calls 1,400 - 5,000 ]       [ Calls > 5,000 (LOOP) ]
+      │                              │                              │
+      ▼                              ▼                              ▼
+  ⭐ TIER 1: FREE TIER        ⚡ TIER 2: PAY-AS-YOU-GO       🚨 TIER 3: CIRCUIT BREAKER
+  Google AI Studio            Secondary Paid Fallback        EMERGENCY SHUTDOWN!
+  1,500 free calls/day.       (costs a few cents,            All paid APIs blocked.
+  Cost: $0.00 / day.          prevents work stops).          Forces LOCAL_FALLBACK.
+                              Cost: ~$0.05.                  Cost: $0.00 (100% Safe).
 ```
 
-1. **Рівень 1 (Free Tier, 0 – 1400 запитів/добу):**
-   Використовує безкоштовний тариф Gemini API (1500 безкоштовних запитів на добу). Для роботи сервера виділено 1400 запитів із запасом. **Витрати: 0 грн.**
-2. **Рівень 2 (Резервний Pay-as-you-go, 1400 – 5000 запитів/добу):**
-   Якщо безкоштовний ліміт вичерпано, або виникла помилка перевантаження `429`, система **не ламається**, а плавно перемикається на резервний режим (Pay-as-you-go). Сервер продовжує повноцінно верифікувати плани через Gemini/Vertex AI, коштуючи лише кілька центів на місяць.
-3. **Рівень 3 (Emergency Safety Circuit Breaker, > 5000 запитів/добу):**
-   Якщо трапився збій у сторонньому скрипті чи агент потрапив у нескінченний цикл — спрацьовує апаратний запобіжник:
-   * Будь-які платні хмарні виклики **негайно блокуються**.
-   * Сервер перемикається у **`LOCAL_FALLBACK_MODE`** (повністю безкоштовна локальна перевірка в пам'яті за ключовими словами та типами).
-   * Кошти власника акаунта на 100% захищені від списання.
+1. **Tier 1 (Free Tier, 0 – 1,400 calls/day):**
+   Utilizes the Google AI Studio / Gemini API Free Tier (1,500 free requests per day). Operating comfortably within 1,400 calls/day, your daily operational cost is **$0.00**.
+2. **Tier 2 (Paid Backup / Pay-as-you-go, 1,400 – 5,000 calls/day):**
+   If the daily free quota is exhausted or temporary `429 Rate Limits` occur, the server does not crash. It automatically escalates to a linked Google Cloud Pay-as-you-go backend (Gemini / Vertex AI). Verification continues seamlessly at a cost of only a few cents per month.
+3. **Tier 3 (Emergency Safety Circuit Breaker, > 5,000 calls/day):**
+   If an agent goes rogue or is trapped in an infinite script loop, the circuit breaker trips:
+   * **All paid external cloud API calls are immediately hard-blocked**.
+   * The server switches to **`LOCAL_FALLBACK_MODE`** (in-memory keyword BM25 search + deterministic TypeScript schema & rule auditing).
+   * **Your funds and credit card are 100% protected against runaway charges.**
 
 ---
 
-## ⚙️ Технічна архітектура системи
+## ⚙️ Technical Architecture & In-Memory RAM Mirroring
 
-### 1. Локальне RAM-дзеркало (`local-mirror.json`) та нульова вартість читання БД
-* При запуску сервер один раз вивантажує чанки бази знань з Google Cloud Firestore у локальний файл `local-mirror.json` та тримає їх в оперативній пам'яті процесу (`ramMirror`).
-* Усі пошукові запити агента виконуються **в оперативній пам'яті** через комбінацію:
-  * Векторної схожості (Cosine Similarity над 768-вимірними векторами `gemini-embedding-001`).
-  * Пошуку за ключовими словами (BM25).
-* **0 звернень до платної бази даних** під час регулярного діалогу з агентом!
+### 1. In-Memory RAM Cache Mirror (`local-mirror.json`) — $0 Database Read Costs
+* At server boot, all knowledge chunks for the active project and `global` space are loaded into process memory (`ramMirror`) and cached locally in `local-mirror.json`.
+* All `truth_search` requests execute **entirely in RAM** using hybrid scoring:
+  * **Vector Cosine Similarity** over 768-dimensional embeddings (`gemini-embedding-001`).
+  * **BM25 Keyword Matching** over section titles and body content.
+* **Zero Firestore read charges during developer/agent conversations!** (Comfortably inside Firestore's 50,000 free daily reads).
 
-### 2. Мультипроєктність та пріоритизація
-* Сервер автоматично визначає поточний проект за назвою git-каталогу або `package.json`.
-* Пошук виконується одночасно у двох просторах: `project_id == currentProjectId` та `project_id == "global"`.
-* Правила поточного проекту отримують тег **`[HIGH (PROJECT OVERRIDE)]`** та підвищену вагу ранжування, тоді як загальні правила мають пріоритет **`[BASE (GLOBAL)]`**.
+### 2. Multi-Project Isolation with Priority Boosting
+* Truth Guard automatically detects the active project from the git repository name or `package.json`.
+* Search runs concurrently across two namespaces: `project_id == currentProjectId` and `project_id == "global"`.
+* Project-specific facts receive a **`[HIGH (PROJECT OVERRIDE)]`** priority tag and rank boost over global defaults (**`[BASE (GLOBAL)]`**).
 
-### 3. Фоновий індексатор (Background Smart Watcher)
-* За допомогою `chokidar` сервер у реальному часі відстежує зміни у файлах `**/*.md`, `**/*.schema.ts`, `**/*.types.ts`.
-* Кожна секція хешується через SHA-256 (`.truth-hashes.json`).
-* Запит на створення векторного ембедінгу відправляється **лише для тих секцій, текст яких дійсно змінився**.
+### 3. Background Smart Watcher (Zero Quota Waste)
+* Powered by `chokidar`, Truth Guard continuously monitors `**/*.md`, `**/*.schema.ts`, and `**/*.types.ts`.
+* Sections are tracked via SHA-256 hashes in `.truth-hashes.json`.
+* Embeddings are generated **only for sections whose text has genuinely changed**.
 
 ---
 
-## 📜 5 Універсальних Інженерних Законів
+## 📜 The 5 Universal Engineering Laws
 
-У файлі `global-rules.md` зафіксовано 5 непорушних інженерних законів, які автоматично завантажуються в глобальний простір знань:
+Defined in [`global-rules.md`](global-rules.md) and seeded automatically into `project_id: "global"`:
 
 1. **Grounded Context (`global-no-guessing`):**
-   Заборонено вгадувати структуру даних чи логіку. Будь-яка дія починається з виклику `truth_search`.
+   Agents are forbidden from guessing codebase architecture, database schemas, or API contracts. Every task starts with `truth_search`.
 2. **Cross-Segment Isolation (`global-surgical-scope`):**
-   Суворе дотримання Clean Architecture. Заборонено змішувати зміни між Доменом, Юзкейсами, Базою даних та Інтерфейсом в одному неподільному блоці.
+   Strict Clean Architecture boundaries. Never blend changes across Domain, Application, Infrastructure, and UI in a single monolithic edit.
 3. **Verification Honesty (`global-verification-honesty`):**
-   Заборонено підробляти проходження тестів чи приховувати помилки компілятора (`@ts-ignore`). Кожен план повинен цитувати реальні ID фактів.
+   Never bypass compiler diagnostics (`@ts-ignore`) or mock test passes. Every plan must cite authentic `cited_fact_ids`.
 4. **Ledger-First Accounting (`global-defensive-code`):**
-   Усі гроші зберігаються виключно в цілих копійках (`integer cents`). Фізичні залишки та резерви змінюються лише через незмінні проводки дельти (+ / -).
+   All currency values must use integer cents (`integer cents`). Balances must never be directly overwritten; every inventory change must be an immutable ledger delta (+ / -).
 5. **Hierarchy of Truth (`global-project-priority`):**
-   Правила конкретного проекту завжди мають вищий пріоритет над загальними правилами у разі конфлікту.
+   Project-specific rules always take absolute precedence over global defaults when conflicting.
 
 ---
 
-## 🛠️ Інструменти MCP (MCP Tools)
+## 🛠️ MCP Tools Reference
 
-Сервер надає 4 стандартні інструменти за протоколом MCP:
+The server exposes 4 standard Model Context Protocol (MCP) tools:
 
-| Інструмент | Опис | Параметри |
+| Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
-| `truth_search` | Семантичний пошук у RAM-дзеркалі (0 читань з БД) | `query` (текст запиту), `include_global` (чи шукати в глобальних) |
-| `truth_verify_plan` | Суворий аудитор плану з генерацією крипточека | `proposed_plan` (текст плану), `cited_fact_ids` (масив ID фактів) |
-| `truth_upsert_rule` | Створення чи оновлення правила локально і в базі | `scope` (`project`/`global`), `file_path`, `section_title`, `content` |
-| `truth_status` | Звіт про статус системи, квоти, тариф та запобіжник | `target_project` (опціонально) |
+| `truth_search` | In-memory semantic & BM25 search (0 database reads) | `query` (search text), `include_global` (boolean) |
+| `truth_verify_plan` | Multi-tier LLM verification gate & receipt generator | `proposed_plan` (string), `cited_fact_ids` (array of strings) |
+| `truth_upsert_rule` | Create or update a spec rule locally and in cloud storage | `scope` (`project`/`global`), `file_path`, `section_title`, `content` |
+| `truth_status` | Comprehensive status report: active tier, RAM chunks, circuit breaker | `target_project` (optional) |
 
 ---
 
-## 🚀 Швидкий старт та розгортання
+## 🚀 Quickstart & Deployment Guide
 
-### 1. Клонування та встановлення залежностей
+### 1. Clone & Install Dependencies
 ```bash
-git clone https://github.com/your-username/antigravity-truth-guard.git
+git clone https://github.com/bushold-dev/antigravity-truth-guard.git
 cd antigravity-truth-guard
 npm install
 ```
 
-### 2. Налаштування змінних оточення
-Скопіюйте `.env.example` у `.env`:
+### 2. Configure Environment Variables
+Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
-Заповніть `.env`:
+Fill in your configuration:
 ```ini
-# Безкоштовний ключ Gemini API (отримати на https://aistudio.google.com/app/apikey)
+# Free Gemini API Key (Get free key at https://aistudio.google.com/app/apikey)
 GEMINI_API_KEY="your-gemini-api-key-here"
 
-# ID вашого Google Cloud проекту (де створено базу Firestore)
-GCP_PROJECT="my-cloud-project-id"
+# Google Cloud Project ID with Firestore Native database
+GCP_PROJECT="your-google-cloud-project-id"
 FIRESTORE_DATABASE="(default)"
 ```
 
-### 3. Створення векторного індексу у Firestore (один раз)
-Виконайте команду у Google Cloud SDK CLI:
+### 3. Create Firestore Composite Vector Index (Run Once)
 ```bash
 gcloud firestore indexes composite create \
   --collection-group=truth_chunks \
@@ -189,95 +191,67 @@ gcloud firestore indexes composite create \
   --field-config=field-path=embedding,vector-config='{"dimension":"768","flat":{}}'
 ```
 
-### 4. Запуск самотестування
+### 4. Run Verification Self-Test
 ```bash
 npm test
 ```
-Ви побачите звіт про завантаження RAM-дзеркала, успішну верифікацію тестового плану та перевірку аварійного запобіжника.
+Verifies RAM mirror preloading, semantic search, plan verification, and the circuit breaker safety system.
 
 ---
 
-## 🔌 Підключення до Antigravity, Claude, Codex, Cursor
+## 🔌 Connecting to Antigravity, Claude, Codex, and Cursor
 
-### Для Google Antigravity
-Додайте у ваш файл `~/.gemini/config/mcp_config.json` або `~/.gemini/antigravity/mcp_config.json`:
+### For Google Antigravity
+Add to `~/.gemini/config/mcp_config.json` or `~/.gemini/antigravity/mcp_config.json`:
 ```json
 {
   "mcpServers": {
     "antigravity-truth-guard": {
       "command": "node",
-      "args": ["/абсолютний/шлях/до/antigravity-truth-guard/server.mjs"]
+      "args": ["/absolute/path/to/antigravity-truth-guard/server.mjs"]
     }
   }
 }
 ```
 
-### Для Claude Code (`claude.json`)
+### For Claude Code (`claude.json`)
 ```json
 {
   "mcpServers": {
     "truth-guard": {
       "command": "node",
-      "args": ["/абсолютний/шлях/до/antigravity-truth-guard/server.mjs"]
+      "args": ["/absolute/path/to/antigravity-truth-guard/server.mjs"]
     }
   }
 }
 ```
 
-### Для OpenAI Codex (`~/.codex/config.toml`)
+### For OpenAI Codex (`~/.codex/config.toml`)
 ```toml
 [mcp_servers.truth_guard]
 command = "node"
-args = ["/абсолютний/шлях/до/antigravity-truth-guard/server.mjs"]
+args = ["/absolute/path/to/antigravity-truth-guard/server.mjs"]
 ```
 
-### Автоматичний захист у проекті (`package.json`)
-Додайте перевірку квитанції у ваш скрипт верифікації проекту:
+### Enforce in Your Project's CI/CD or Build Script (`package.json`)
 ```json
 {
   "scripts": {
-    "verify": "node /шлях/до/antigravity-truth-guard/check-receipt.mjs && npm run lint && npm test"
+    "verify": "node /path/to/antigravity-truth-guard/check-receipt.mjs && npm run lint && npm test"
   }
 }
 ```
-Тепер жоден ШІ-агент не зможе зафіксувати код або пройти тести, якщо попередньо не отримав позитивний висновок від `truth_verify_plan`!
+If an AI agent modifies code in `src/` without obtaining an authentic `.truth-receipt.json` from `truth_verify_plan`, this script immediately halts the build!
 
 ---
 
-## 🤖 Готові промпти для ШІ-агентів (Prompts Library)
+## 🤖 AI Agent Prompts Library
 
-Повна бібліотека інструкцій міститься у файлі [**`PROMPTS.md`**](PROMPTS.md). Нижче наведено два основні готові промпти, які ви можете скопіювати і вставити у ваш ШІ-асистент.
-
-### 1. Промпт для автономного розгортання Truth Guard під ключ:
-> Скопіюйте цей промпт та віддайте агенту (Antigravity, Claude, Codex, Cursor), щоб він сам налаштував MCP-сервер, Google Cloud та Free Tier ключ:
-
-```markdown
-Твоя задача — повністю автономно розгорнути та підключити глобальну мультипроєктну антигалюциногенну MCP-систему `antigravity-truth-guard`, яка працює на безкоштовних лімітах (Firestore Free Tier + Google AI Studio Free Tier до 1500 запитів/добу).
-
-Виконай усі кроки послідовно через консоль і файлову систему:
-1. Підготуй Google Cloud: увімкни `firestore.googleapis.com` та `generativelanguage.googleapis.com`, створи базу Firestore `(default)` та векторний композитний індекс для `truth_chunks` на поле `embedding` (768d, COSINE/FLAT) за `project_id`.
-2. Отримай безкоштовний ключ Gemini API та збережи у `.env` (із fallback на Application Default Credentials).
-3. Встанови залежності (`npm install`) у директорії `antigravity-truth-guard`.
-4. Зареєструй MCP-сервер у конфігураціях моїх агентів (`~/.gemini/config/mcp_config.json`, `~/.claude/claude.json`, `~/.codex/config.toml`).
-5. Запусти `node self-test.mjs` та виведи фінальний звіт готовності.
-```
-
-### 2. Промпт для впровадження обов'язкової верифікації у вашому робочому проекті:
-> Скопіюйте цей промпт та віддайте агенту всередині вашого проекту (наприклад, бекенду чи веб-сервісу), щоб увімкнути захисний шлюз:
-
-```markdown
-Твоя задача — інтегрувати захисний шлюз верифікації Antigravity Truth Guard у цей проєкт:
-1. Додай обов'язковий протокол до інструкцій агента (`AGENTS.md` або `.agent/rules/`):
-   - Закон 1 (Grounded Context): Заборонено здогадуватися про архітектуру чи схеми даних. Перед початком задачі обов'язково викликати `truth_search`.
-   - Закон 2 (Truth Verify Gate): Перед редагуванням коду обов'язково викликати `truth_verify_plan` з планом та `cited_fact_ids`. При `approved: false` — негайно зупинитися і виправити порушення.
-   - Закон 3 (Spec Immutability): Заборонено самовільно змінювати файли специфікацій.
-2. Скопіюй перевіряльник `check-receipt.mjs` у `scripts/check-receipt.mjs`.
-3. Додай виклик `node scripts/check-receipt.mjs` на початок скрипту `"verify"` у `package.json`:
-   `"verify": "node scripts/check-receipt.mjs && tsc --noEmit && npm test"`
-4. Переконайся, що за наявності незакомічених змін у `src/` скрипт вимагає свіжу цифрову квитанцію `.git/.truth-receipt.json`, видану аудитором.
-```
+We provide ready-to-use copy-paste prompts in [**`PROMPTS.md`**](PROMPTS.md) ([Українська версія](PROMPTS.uk.md)):
+1. **Autonomous Setup Prompt:** Directs any AI agent to prepare Google Cloud, install Truth Guard, and connect it to your IDE.
+2. **Repository Enforcement Prompt:** Directs any AI agent to enforce mandatory verification receipts and the 3 Laws of Truth inside an existing project.
 
 ---
 
-## 📄 Ліцензія
-Проект поширюється під відкритою ліцензією [MIT](LICENSE). Внески, форки та покращення вітаються!
+## 📄 License
+Released under the open-source [MIT License](LICENSE). Contributions, issues, and forks are welcome!
