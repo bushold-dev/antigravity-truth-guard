@@ -69,10 +69,10 @@ Imagine you are constructing a high-rise building, and the AI agent is an ultra-
 ```
 
 ### The "Notary & Blueprint" Principle:
-* **The Blueprint (Ground Truth):** Your project specifications, schema contracts, and domain rules stored in `.md` and `.schema.ts` files. Truth Guard indexes them into a high-speed knowledge base.
+* **The Blueprint (Ground Truth):** Your project specifications, schema contracts, and domain rules stored in `.md` specification files (safe from self-poisoning). Truth Guard indexes them into a high-speed knowledge base.
 * **Mandatory Fact-Check (`truth_search`):** The AI agent is strictly forbidden from writing code blind. It must first ask Truth Guard: *“What are the exact, verified rules for this subsystem?”*.
-* **The Independent Verification Gate (`truth_verify_plan`):** Before modifying any code, the agent submits its implementation plan. An independent AI auditor cross-references every single table, column, enum, and arithmetic operation against the Ground Truth facts. If the agent invented anything, the plan is **instantly rejected**.
-* **Cryptographic Verification Receipt (`.truth-receipt.json`):** Only when the plan is 100% faithful does Truth Guard issue a time-stamped, cryptographically signed receipt. The repository verification harness (`npm run verify`) rejects any code compilation or test run if code changes exist without an authentic receipt!
+* **The Independent Verification Gate (`truth_verify_plan`):** Before modifying any code, the agent submits its implementation plan along with the intended `target_files`. An independent AI auditor cross-references every single table, column, enum, and arithmetic operation against the Ground Truth facts. If the agent invented anything, the plan is **instantly rejected**.
+* **Cryptographic Verification Receipt (`.truth-receipt.json`):** Only when the plan is 100% faithful does Truth Guard issue a time-stamped, cryptographically signed receipt bound to `target_files` (15-minute TTL, single-use per git commit). The repository verification harness (`npm run verify` and Git pre-commit hooks) rejects any commit or test run if code changes exist without an authentic, fresh receipt!
 
 ---
 

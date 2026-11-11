@@ -208,6 +208,30 @@ export function detectProjectId(cwd = process.cwd()) {
   return baseName || 'default-project';
 }
 
+export function getProjectDirByProjectId(targetProject) {
+  if (!targetProject) return null;
+  try {
+    const projDir = path.join(os.homedir(), '.gemini', 'config', 'projects');
+    if (fs.existsSync(projDir)) {
+      const files = fs.readdirSync(projDir).filter(f => f.endsWith('.json'));
+      for (const f of files) {
+        const pData = JSON.parse(fs.readFileSync(path.join(projDir, f), 'utf8'));
+        if (pData.name && pData.name.toLowerCase() === targetProject.toLowerCase()) {
+          const res = pData.projectResources?.resources || [];
+          for (const r of res) {
+            const uri = r.gitFolder?.folderUri || r.folderUri;
+            if (uri) {
+              const decoded = decodeURIComponent(uri.replace(/^file:\/\/\/?/, ''));
+              return decoded.replace(/\//g, path.sep);
+            }
+          }
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
 function slugify(text) {
   return text
     .toLowerCase()
@@ -497,12 +521,12 @@ export async function indexProjectDirectory(rootDir, projectId) {
   function scanDir(dir) {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const ent of entries) {
-      if (['node_modules', '.git', 'dist', '.next', 'build', '.agent', '.aistudio', '.gemini', '.idx', '.tmp', 'brain'].includes(ent.name)) continue;
+      if (['node_modules', '.git', 'dist', '.next', 'build', '.agent', '.aistudio', '.gemini', '.idx', '.tmp', 'brain', 'src', 'packages', 'server'].includes(ent.name)) continue;
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) {
         scanDir(full);
       } else if (ent.isFile()) {
-        if (ent.name.endsWith('.md') || ent.name.endsWith('.schema.ts') || ent.name.endsWith('.types.ts')) {
+        if (ent.name.endsWith('.md')) {
           files.push(full);
         }
       }
@@ -613,28 +637,44 @@ export async function searchTruth({ query, include_global = true, target_project
   return topResults;
 }
 
-export function writeTruthReceipt({ projectId, citedFactIds, proposedPlan, receiptToken }) {
+export function writeTruthReceipt({ projectId, citedFactIds, proposedPlan, targetFiles = [], projectDir = null, receiptToken }) {
   const planHash = crypto.createHash('sha256').update(proposedPlan).digest('hex');
   const timestamp = new Date().toISOString();
-  const signatureData = `${projectId}:${planHash}:${timestamp}:${citedFactIds.slice().sort().join(',')}`;
+  const citedSorted = Array.isArray(citedFactIds) ? citedFactIds.slice().sort().join(',') : '';
+  const targetSorted = Array.isArray(targetFiles) ? targetFiles.slice().sort().join(',') : '';
+
+  const signatureData = targetSorted
+    ? `${projectId}:${planHash}:${targetSorted}:${timestamp}:${citedSorted}`
+    : `${projectId}:${planHash}:${timestamp}:${citedSorted}`;
+
   const signature = crypto.createHmac('sha256', GEMINI_API_KEY || 'truth-guard-secret').update(signatureData).digest('hex');
 
   const receipt = {
     timestamp,
     project_id: projectId,
     cited_fact_ids: citedFactIds,
+    target_files: targetFiles,
     plan_hash: planHash,
     signature,
-    receipt_token: receiptToken
+    receipt_token: receiptToken,
+    consumed: false
   };
 
-  const cwd = process.cwd();
-  const gitDir = path.join(cwd, '.git');
+  // Resolve target project directory
+  let resolvedDir = projectDir;
+  if (!resolvedDir && projectId) {
+    resolvedDir = getProjectDirByProjectId(projectId);
+  }
+  if (!resolvedDir) {
+    resolvedDir = process.cwd();
+  }
+
+  const gitDir = path.join(resolvedDir, '.git');
   let targetPath;
   if (fs.existsSync(gitDir) && fs.statSync(gitDir).isDirectory()) {
     targetPath = path.join(gitDir, '.truth-receipt.json');
   } else {
-    targetPath = path.join(cwd, '.truth-receipt.json');
+    targetPath = path.join(resolvedDir, '.truth-receipt.json');
   }
 
   try {
@@ -642,6 +682,17 @@ export function writeTruthReceipt({ projectId, citedFactIds, proposedPlan, recei
     console.error(`[truth-guard] Wrote verification receipt to ${targetPath}`);
   } catch (err) {
     console.error(`[truth-guard] Failed to write receipt to ${targetPath}:`, err.message);
+  }
+
+  // Also write to current process cwd as fallback
+  if (resolvedDir !== process.cwd()) {
+    try {
+      const fallbackGit = path.join(process.cwd(), '.git');
+      const fallbackTarget = fs.existsSync(fallbackGit)
+        ? path.join(fallbackGit, '.truth-receipt.json')
+        : path.join(process.cwd(), '.truth-receipt.json');
+      fs.writeFileSync(fallbackTarget, JSON.stringify(receipt, null, 2), 'utf8');
+    } catch {}
   }
 
   return receipt;
@@ -736,7 +787,7 @@ async function executeLLMVerification({ systemInstruction, userPrompt }) {
 }
 
 // Plan Verification Gate
-export async function verifyPlan({ proposed_plan, cited_fact_ids }) {
+export async function verifyPlan({ proposed_plan, cited_fact_ids, target_files = [], project_dir = null }) {
   const currentProjectId = detectProjectId();
 
   // Find cited facts from RAM mirror (0 Firestore reads)
@@ -756,9 +807,10 @@ export async function verifyPlan({ proposed_plan, cited_fact_ids }) {
 Verify whether every single step, database table, column name, status enum, rule, and assumption in PROPOSED PLAN is strictly grounded in the provided GROUND TRUTH FACTS.
 
 Strict verification rules:
-1. If the plan invents ANY unverified table, column, status, rule, or assumption that is NOT present in the Ground Truth Facts or contradicts them, flag it immediately as a hallucination.
+1. If the plan invents ANY unverified database table, database column, status enum, business calculation formula, or contradicts domain rules, flag it immediately as a hallucination.
 2. If no ground truth facts were cited or found, and the plan specifies detailed architectural/database assertions, reject it for lack of grounding.
-3. Output valid JSON strictly conforming to this schema:
+3. Implementation details (such as creating tests, refactoring scripts, or project tooling) that directly serve or verify the cited rules without violating architectural boundaries are allowed.
+4. Output valid JSON strictly conforming to this schema:
 {
   "approved": boolean,
   "score": number, // between 0.0 and 1.0 (1.0 = completely faithful, <0.9 = contains hallucinations or ungrounded assumptions)
@@ -802,6 +854,8 @@ Strict verification rules:
           projectId: currentProjectId,
           citedFactIds: cited_fact_ids,
           proposedPlan: proposed_plan,
+          targetFiles: target_files,
+          projectDir: project_dir,
           receiptToken
         });
       }
@@ -859,6 +913,8 @@ Strict verification rules:
       projectId: currentProjectId,
       citedFactIds: cited_fact_ids,
       proposedPlan: proposed_plan,
+      targetFiles: target_files,
+      projectDir: project_dir,
       receiptToken
     });
   }
@@ -971,9 +1027,10 @@ export async function getTruthStatus(target_project) {
 
 function startWatcher(rootDir, projectId) {
   console.error(`[truth-guard] Starting file watcher for ${projectId} at ${rootDir}`);
-  const watcher = chokidar.watch(['**/*.md', '**/*.schema.ts', '**/*.types.ts'], {
+  // Only watch markdown documentation and specifications in safe directories; DO NOT watch runtime src/ code
+  const watcher = chokidar.watch(['docs/**/*.md', '.agent/truth/**/*.md', 'RULES.md', 'README.md'], {
     cwd: rootDir,
-    ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/.next/**', '**/build/**', '**/.agent/**'],
+    ignored: ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/src/**', '**/packages/**', '**/server/**'],
     ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 }
   });
@@ -1032,10 +1089,12 @@ export function createTruthGuardServer() {
     'Anti-hallucination verification gate: checks proposed plan against ground truth facts using multi-tier LLM engine',
     {
       proposed_plan: z.string().min(1).max(50000).describe('The proposed technical plan, architecture changes, or code implementation details'),
-      cited_fact_ids: z.array(z.string().max(250)).max(100).describe('Array of fact_id references retrieved from truth_search')
+      cited_fact_ids: z.array(z.string().max(250)).max(100).describe('Array of fact_id references retrieved from truth_search'),
+      target_files: z.array(z.string().max(500)).max(100).optional().describe('List of file paths intended to be created or modified'),
+      project_dir: z.string().max(1000).optional().describe('Optional absolute path to project root directory')
     },
-    async ({ proposed_plan, cited_fact_ids }) => {
-      const verification = await verifyPlan({ proposed_plan, cited_fact_ids });
+    async ({ proposed_plan, cited_fact_ids, target_files = [], project_dir }) => {
+      const verification = await verifyPlan({ proposed_plan, cited_fact_ids, target_files, project_dir });
       return {
         content: [{ type: 'text', text: JSON.stringify(verification, null, 2) }]
       };

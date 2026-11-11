@@ -49,9 +49,9 @@ async function runSelfTest() {
   console.log('\n[4/5] Testing truth_verify_plan (Grounded plan)...');
   const groundedPlan = `
 Implementation Plan:
-1. Follow Law 1 (Grounded Context): Retrieve specifications with truth_search before writing code.
-2. Follow Law 2 (Cross-Segment Isolation): Separate Domain Core changes from Infrastructure and Delivery.
-3. Follow Law 3 (Verification Honesty): Run compiler checks and unit tests honestly without bypassing errors.
+1. Follow Grounded Context: Retrieve specifications with truth_search before writing code.
+2. Follow Clean Architecture Cross-Segment Isolation: Separate Domain Core changes from Infrastructure and Delivery as specified in project rules.
+3. Follow Verification Honesty: Run compiler checks and unit tests honestly without bypassing errors.
   `.trim();
 
   const verifyPass = await verifyPlan({
