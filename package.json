@@ -1,0 +1,36 @@
+{
+  "name": "antigravity-truth-guard",
+  "version": "2.0.0",
+  "description": "Global Multi-Project Anti-Hallucination MCP Guard for Autonomous AI Coding Agents with Zero-Runaway-Cost Protection",
+  "type": "module",
+  "main": "server.mjs",
+  "bin": {
+    "truth-guard": "server.mjs",
+    "truth-check-receipt": "check-receipt.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node self-test.mjs",
+    "check-receipt": "node check-receipt.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "ai-agent",
+    "anti-hallucination",
+    "verification-gate",
+    "truth-guard",
+    "antigravity",
+    "gemini",
+    "firestore",
+    "circuit-breaker"
+  ],
+  "author": "Antigravity Open Source Community",
+  "license": "MIT",
+  "dependencies": {
+    "@google-cloud/firestore": "^7.11.0",
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "chokidar": "^4.0.3",
+    "dotenv": "^16.4.7",
+    "zod": "^3.24.2"
+  }
+}
