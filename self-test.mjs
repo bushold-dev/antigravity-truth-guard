@@ -138,8 +138,23 @@ Implementation Plan:
   }
   console.log('✓ PASS: Unconfirmed upsertRule correctly blocked with PENDING_HUMAN_APPROVAL!');
 
-  // 6b: Apply with user confirmation token
-  const token = blockedAttempt.proposed_rule.confirmation_token;
+  // 6b: Verify token was withheld from MCP response (Law 3 Human Gate)
+  if (blockedAttempt.proposed_rule && blockedAttempt.proposed_rule.confirmation_token) {
+    throw new Error('FAILED: Confirmation token was leaked in MCP response! It must be staged out-of-band.');
+  }
+  console.log('✓ PASS: Confirmation token safely withheld from AI agent MCP response.');
+
+  // Read staged token from out-of-band file (.git/.truth-pending-rule.json)
+  const pendingFile = fs.existsSync(path.join(cwd, '.git'))
+    ? path.join(cwd, '.git', '.truth-pending-rule.json')
+    : path.join(cwd, '.truth-pending-rule.json');
+  if (!fs.existsSync(pendingFile)) {
+    throw new Error('FAILED: Staged pending rule file not found at: ' + pendingFile);
+  }
+  const staged = JSON.parse(fs.readFileSync(pendingFile, 'utf8'));
+  const token = staged.token;
+
+  // Apply with operator confirmed token
   const approvedAttempt = await upsertRule({
     scope: 'project',
     file_path: testRuleFile,
