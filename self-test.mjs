@@ -47,7 +47,7 @@ async function runSelfTest() {
   const topFactIds = searchResults.slice(0, 5).map(r => r.fact_id);
 
   // Step 3: Truthful Plan Verification (Grounded in Global Rules)
-  console.log('\n[4/5] Testing truth_verify_plan (Grounded plan)...');
+  console.log('\n[4/7] Testing truth_verify_plan (Grounded plan with strict target_files binding)...');
   const groundedPlan = `
 Implementation Plan:
 1. Follow Grounded Context: Retrieve specifications with truth_search before writing code.
@@ -55,9 +55,21 @@ Implementation Plan:
 3. Follow Verification Honesty: Run compiler checks and unit tests honestly without bypassing errors.
   `.trim();
 
+  // 3a: Attempt without target_files -> MUST be rejected (Law 3 Binding)
+  const missingTargets = await verifyPlan({
+    proposed_plan: groundedPlan,
+    cited_fact_ids: topFactIds,
+    target_files: []
+  });
+  if (missingTargets.approved) {
+    throw new Error('FAILED: Plan with empty target_files was approved! target_files must be mandatory.');
+  }
+  console.log('✓ PASS: Empty target_files strictly rejected by verification gate.');
+
   const verifyPass = await verifyPlan({
     proposed_plan: groundedPlan,
-    cited_fact_ids: topFactIds
+    cited_fact_ids: topFactIds,
+    target_files: ['src/domain/core.ts']
   });
 
   console.log('Verification result:', JSON.stringify(verifyPass, null, 2));
@@ -67,23 +79,55 @@ Implementation Plan:
     console.log(`✓ PASS: Plan verified successfully! Receipt: ${verifyPass.receipt_token} (Tier: ${verifyPass.tier})`);
   }
 
-  // Step 4: Emergency Safety Circuit Breaker Test
-  console.log('\n[5/5] Testing Emergency Safety Circuit Breaker & LOCAL_FALLBACK_MODE...');
+  // Step 4: Emergency Safety Circuit Breaker & Fail-Closed Fallback Mode
+  console.log('\n[5/7] Testing Emergency Safety Circuit Breaker & Fail-Closed LOCAL_FALLBACK_MODE...');
   const tracker = getQuotaTracker();
   tracker.tripCircuitBreaker('Simulation test for circuit breaker activation');
 
-  const fallbackTest = await verifyPlan({
+  // 4a: Fallback without human override -> MUST be blocked fail-closed
+  const fallbackBlocked = await verifyPlan({
     proposed_plan: groundedPlan,
-    cited_fact_ids: topFactIds
+    cited_fact_ids: topFactIds,
+    target_files: ['src/domain/core.ts']
   });
 
-  if (fallbackTest.tier !== 'LOCAL_FALLBACK') {
-    throw new Error(`Expected tier to be LOCAL_FALLBACK, got ${fallbackTest.tier}`);
+  if (fallbackBlocked.approved) {
+    throw new Error('FAILED: Local fallback mode approved plan without human override! Fail-closed violated.');
   }
-  console.log(`✓ PASS: Emergency Safety Circuit Breaker correctly enforced LOCAL_FALLBACK!`);
+  if (!fallbackBlocked.requires_human_override || !fallbackBlocked.override_token) {
+    throw new Error(`Expected requires_human_override and override_token, got: ${JSON.stringify(fallbackBlocked)}`);
+  }
+  console.log('✓ PASS: Fail-Closed Local Fallback correctly blocked ungrounded offline plan!');
 
-  // Step 6: Testing Human-in-the-Loop Spec Protection (truth_upsert_rule)
-  console.log('\n[6/6] Testing Human-in-the-Loop Spec Protection (truth_upsert_rule)...');
+  // 4b: Fallback with explicit human override token -> Approved
+  const fallbackApproved = await verifyPlan({
+    proposed_plan: groundedPlan,
+    cited_fact_ids: topFactIds,
+    target_files: ['src/domain/core.ts'],
+    human_override: true,
+    override_token: fallbackBlocked.override_token
+  });
+
+  if (!fallbackApproved.approved || fallbackApproved.tier !== 'LOCAL_FALLBACK_HUMAN_OVERRIDE') {
+    throw new Error(`Expected approved fallback with human override, got: ${JSON.stringify(fallbackApproved)}`);
+  }
+  console.log('✓ PASS: Emergency Fallback succeeded with explicit human override token.');
+
+  // Step 5: Quota Tracker Atomic Pre-Reservation & Refund Test
+  console.log('\n[6/7] Testing Atomic Quota Pre-Reservation & Refund...');
+  const beforeUsed = tracker.getTotalUsed();
+  tracker.recordUsage(2);
+  if (tracker.getTotalUsed() !== beforeUsed + 2) {
+    throw new Error('Quota recordUsage failed to increment total_used.');
+  }
+  tracker.refundUsage(2);
+  if (tracker.getTotalUsed() !== beforeUsed) {
+    throw new Error('Quota refundUsage failed to restore total_used.');
+  }
+  console.log('✓ PASS: Quota atomic recordUsage and refundUsage verified.');
+
+  // Step 6: Testing Human-in-the-Loop Spec Protection & Symlink Shield (truth_upsert_rule)
+  console.log('\n[7/7] Testing Human-in-the-Loop Spec Protection & Symlink Shield (truth_upsert_rule)...');
   const testRuleFile = 'test-rule-temp.md';
   const testRulePath = path.join(cwd, testRuleFile);
 

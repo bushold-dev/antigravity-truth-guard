@@ -130,26 +130,41 @@ function checkTruthReceipt() {
     process.exit(1);
   }
 
-  // 7. Verify Plan-Code Binding: target_files matching
-  if (Array.isArray(receipt.target_files) && receipt.target_files.length > 0) {
-    const normalizedTargets = receipt.target_files.map(t => t.replace(/\\/g, '/'));
-    const unauthorizedFiles = codeChangedFiles.filter(file =>
-      !normalizedTargets.some(target => file === target || file.startsWith(target))
-    );
+  // 7. Verify Plan-Code Binding: strict target_files matching & boundary safety
+  if (!Array.isArray(receipt.target_files) || receipt.target_files.length === 0) {
+    console.error('\n❌ [TRUTH GUARD AUDIT FAILED: MISSING TARGET_FILES]');
+    console.error('========================================================================');
+    console.error('Verification receipt does not contain a valid target_files list.');
+    console.error('Law 3 mandates that every receipt must bind explicitly to non-empty target_files.');
+    console.error('AI Agent must call truth_verify_plan with target_files specified.');
+    console.error('========================================================================\n');
+    process.exit(1);
+  }
 
-    if (unauthorizedFiles.length > 0) {
-      console.error('\n❌ [TRUTH GUARD AUDIT FAILED: UNAUTHORIZED FILE MUTATION]');
-      console.error('========================================================================');
-      console.error('Changed code files do not match the approved target_files list in the receipt:');
-      unauthorizedFiles.forEach(f => console.error(`  - ${f}`));
-      console.error('');
-      console.error('Approved target_files:');
-      normalizedTargets.forEach(f => console.error(`  + ${f}`));
-      console.error('');
-      console.error('AI Agent must call truth_verify_plan with the updated target_files list.');
-      console.error('========================================================================\n');
-      process.exit(1);
-    }
+  const normalizedTargets = receipt.target_files.map(t =>
+    t.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '').trim()
+  );
+
+  const unauthorizedFiles = codeChangedFiles.filter(file => {
+    const normFile = file.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '').trim();
+    return !normalizedTargets.some(target => {
+      const boundaryTarget = target.endsWith('/') ? target : target + '/';
+      return normFile === target || normFile.startsWith(boundaryTarget);
+    });
+  });
+
+  if (unauthorizedFiles.length > 0) {
+    console.error('\n❌ [TRUTH GUARD AUDIT FAILED: UNAUTHORIZED FILE MUTATION]');
+    console.error('========================================================================');
+    console.error('Changed code files do not match the approved target_files list in the receipt:');
+    unauthorizedFiles.forEach(f => console.error(`  - ${f}`));
+    console.error('');
+    console.error('Approved target_files:');
+    normalizedTargets.forEach(f => console.error(`  + ${f}`));
+    console.error('');
+    console.error('AI Agent must call truth_verify_plan with the updated target_files list.');
+    console.error('========================================================================\n');
+    process.exit(1);
   }
 
   // 8. Strict Cryptographic Signature Verification (HMAC SHA-256)

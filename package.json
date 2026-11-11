@@ -1,6 +1,6 @@
 {
   "name": "antigravity-truth-guard",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Global Multi-Project Anti-Hallucination MCP Guard for Autonomous AI Coding Agents with Zero-Runaway-Cost Protection",
   "type": "module",
   "main": "server.mjs",

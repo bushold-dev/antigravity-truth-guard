@@ -150,6 +150,21 @@ export function getQuotaTracker() {
       }
       save();
     },
+    refundUsage: (count = 1) => {
+      data.total_used = Math.max(0, data.total_used - count);
+      if (data.payg_tier_used > 0) {
+        const refundPayg = Math.min(data.payg_tier_used, count);
+        data.payg_tier_used -= refundPayg;
+        count -= refundPayg;
+      }
+      if (count > 0 && data.free_tier_used > 0) {
+        data.free_tier_used = Math.max(0, data.free_tier_used - count);
+      }
+      if (data.total_used < CIRCUIT_BREAKER_HARD_CAP && data.circuit_breaker_tripped) {
+        data.circuit_breaker_tripped = false;
+      }
+      save();
+    },
     tripCircuitBreaker: (reason) => {
       data.circuit_breaker_tripped = true;
       logActivity('CIRCUIT_BREAKER_TRIPPED', { reason });
@@ -230,6 +245,79 @@ export function getProjectDirByProjectId(targetProject) {
     }
   } catch {}
   return null;
+}
+
+export function getAuthorizedProjectDirs() {
+  const authorized = new Set();
+  try {
+    authorized.add(fs.realpathSync(process.cwd()));
+  } catch {
+    authorized.add(path.resolve(process.cwd()));
+  }
+
+  try {
+    const projDir = path.join(os.homedir(), '.gemini', 'config', 'projects');
+    if (fs.existsSync(projDir)) {
+      const files = fs.readdirSync(projDir).filter(f => f.endsWith('.json'));
+      for (const f of files) {
+        try {
+          const pData = JSON.parse(fs.readFileSync(path.join(projDir, f), 'utf8'));
+          const res = pData.projectResources?.resources || [];
+          for (const r of res) {
+            const uri = r.gitFolder?.folderUri || r.folderUri;
+            if (uri) {
+              const decoded = decodeURIComponent(uri.replace(/^file:\/\/\/?/, ''));
+              const fsPath = decoded.replace(/\//g, path.sep);
+              if (fs.existsSync(fsPath)) {
+                authorized.add(fs.realpathSync(fsPath));
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
+  return Array.from(authorized);
+}
+
+export function validateAndResolveProjectDir(projectDir, projectId) {
+  const authorizedDirs = getAuthorizedProjectDirs();
+  const defaultDir = (projectId && getProjectDirByProjectId(projectId)) || process.cwd();
+  let defaultReal;
+  try {
+    defaultReal = fs.realpathSync(defaultDir);
+  } catch {
+    defaultReal = path.resolve(defaultDir);
+  }
+
+  if (!projectDir) {
+    return defaultReal;
+  }
+
+  try {
+    const resolved = path.resolve(projectDir);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      console.warn(`[truth-guard] Warning: Supplied project_dir does not exist or is not a directory: ${projectDir}. Using default.`);
+      return defaultReal;
+    }
+
+    const realCandidate = fs.realpathSync(resolved);
+    const isAuthorized = authorizedDirs.some(authDir => {
+      const rel = path.relative(authDir, realCandidate);
+      return !rel.startsWith('..') && !path.isAbsolute(rel);
+    });
+
+    if (!isAuthorized) {
+      console.warn(`[truth-guard] Security Alert: Supplied project_dir (${projectDir}) is outside authorized project workspaces. Falling back to verified default (${defaultReal}).`);
+      return defaultReal;
+    }
+
+    return realCandidate;
+  } catch (err) {
+    console.warn(`[truth-guard] Error validating project_dir: ${err.message}. Using default.`);
+    return defaultReal;
+  }
 }
 
 function slugify(text) {
@@ -333,6 +421,14 @@ export async function generateEmbedding(text, retries = 2) {
 
   for (let attempt = 0; attempt < retries; attempt++) {
     for (const model of models) {
+      if (tracker.isCircuitBreakerTripped()) {
+        return null;
+      }
+
+      // Pre-reserve quota slot atomically
+      tracker.recordUsage(1);
+      let consumed = false;
+
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/${model}:embedContent?key=${GEMINI_API_KEY}`;
         const res = await fetch(url, {
@@ -347,22 +443,31 @@ export async function generateEmbedding(text, retries = 2) {
 
         if (res.status === 429) {
           console.error(`[truth-guard] 429 Rate limit on ${model}, backing off...`);
+          tracker.refundUsage(1);
           await new Promise(r => setTimeout(r, 2000));
           continue;
         }
 
-        if (!res.ok) continue;
+        if (!res.ok) {
+          tracker.refundUsage(1);
+          continue;
+        }
 
         const data = await res.json();
         if (data.embedding?.values) {
-          tracker.recordUsage(1);
+          consumed = true;
           let vals = data.embedding.values;
           if (vals.length > 768) vals = vals.slice(0, 768);
           while (vals.length < 768) vals.push(0);
           return vals;
+        } else {
+          tracker.refundUsage(1);
         }
       } catch (err) {
         console.error(`[truth-guard] Network error on ${model}:`, err.message);
+        if (!consumed) {
+          tracker.refundUsage(1);
+        }
       }
     }
     await new Promise(r => setTimeout(r, 1000));
@@ -660,14 +765,8 @@ export function writeTruthReceipt({ projectId, citedFactIds, proposedPlan, targe
     consumed: false
   };
 
-  // Resolve target project directory
-  let resolvedDir = projectDir;
-  if (!resolvedDir && projectId) {
-    resolvedDir = getProjectDirByProjectId(projectId);
-  }
-  if (!resolvedDir) {
-    resolvedDir = process.cwd();
-  }
+  // Resolve and validate target project directory against authorized workspaces
+  const resolvedDir = validateAndResolveProjectDir(projectDir, projectId);
 
   const gitDir = path.join(resolvedDir, '.git');
   let targetPath;
@@ -721,6 +820,12 @@ async function executeLLMVerification({ systemInstruction, userPrompt }) {
     ];
 
     for (const model of models) {
+      if (tracker.isCircuitBreakerTripped()) break;
+
+      // Pre-reserve quota slot atomically
+      tracker.recordUsage(1);
+      let consumed = false;
+
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${GEMINI_API_KEY}`;
         const res = await fetch(url, {
@@ -735,19 +840,28 @@ async function executeLLMVerification({ systemInstruction, userPrompt }) {
 
         if (res.status === 429) {
           console.error(`[truth-guard] 429 Rate limit on ${model}, escalating to Tier 2 (PAYG)...`);
+          tracker.refundUsage(1);
           break; // Escalate to Tier 2
         }
 
-        if (res.ok) {
-          const data = await res.json();
-          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (rawText) {
-            tracker.recordUsage(1);
-            return { tierUsed: 'CLOUD_FREE', rawText };
-          }
+        if (!res.ok) {
+          tracker.refundUsage(1);
+          continue;
+        }
+
+        const data = await res.json();
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (rawText) {
+          consumed = true;
+          return { tierUsed: 'CLOUD_FREE', rawText };
+        } else {
+          tracker.refundUsage(1);
         }
       } catch (err) {
         console.error(`[truth-guard] Error on ${model}:`, err.message);
+        if (!consumed) {
+          tracker.refundUsage(1);
+        }
       }
     }
   }
@@ -758,6 +872,11 @@ async function executeLLMVerification({ systemInstruction, userPrompt }) {
 
   const paygModels = ['models/gemini-2.5-flash', 'models/gemini-1.5-flash'];
   for (const model of paygModels) {
+    if (tracker.isCircuitBreakerTripped()) break;
+
+    tracker.recordUsage(1);
+    let consumed = false;
+
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${GEMINI_API_KEY}`;
       const res = await fetch(url, {
@@ -770,16 +889,24 @@ async function executeLLMVerification({ systemInstruction, userPrompt }) {
         })
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (rawText) {
-          tracker.recordUsage(1);
-          return { tierUsed: 'CLOUD_PAYG', rawText };
-        }
+      if (!res.ok) {
+        tracker.refundUsage(1);
+        continue;
+      }
+
+      const data = await res.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (rawText) {
+        consumed = true;
+        return { tierUsed: 'CLOUD_PAYG', rawText };
+      } else {
+        tracker.refundUsage(1);
       }
     } catch (e) {
       console.error(`[truth-guard] PAYG attempt failed for ${model}:`, e.message);
+      if (!consumed) {
+        tracker.refundUsage(1);
+      }
     }
   }
 
@@ -787,8 +914,28 @@ async function executeLLMVerification({ systemInstruction, userPrompt }) {
 }
 
 // Plan Verification Gate
-export async function verifyPlan({ proposed_plan, cited_fact_ids, target_files = [], project_dir = null }) {
+export async function verifyPlan({
+  proposed_plan,
+  cited_fact_ids,
+  target_files = [],
+  project_dir = null,
+  human_override = false,
+  override_token = null
+}) {
   const currentProjectId = detectProjectId();
+
+  // Strict target_files validation (Law 3 Binding)
+  if (!Array.isArray(target_files) || target_files.length === 0) {
+    const rejectToken = `TG-REJECTED-${crypto.randomBytes(6).toString('hex')}`;
+    return {
+      approved: false,
+      score: 0.0,
+      hallucinations_or_missing_conditions: [
+        'Law 3 Violation: target_files is strictly mandatory and must contain at least one target file path to bind the verification receipt to code changes.'
+      ],
+      receipt_token: rejectToken
+    };
+  }
 
   // Find cited facts from RAM mirror (0 Firestore reads)
   const citedFacts = [];
@@ -880,8 +1027,8 @@ Strict verification rules:
     }
   }
 
-  // Deterministic Local Fallback Verification Mode
-  console.error('[truth-guard] Running Deterministic Local Fallback Verification...');
+  // Deterministic Local Fallback Verification Mode (Fail-Closed by default)
+  console.error('[truth-guard] Fallback Mode active (LLM offline or unavailable)...');
   const localIssues = [];
   if (cited_fact_ids.length === 0) {
     localIssues.push('No cited_fact_ids provided for verification.');
@@ -903,10 +1050,41 @@ Strict verification rules:
     }
   }
 
+  // Fail-Closed Gate: Local offline mode cannot perform semantic fact verification
+  const expectedOverrideToken = 'OVERRIDE-' + crypto.createHash('sha256').update(`${currentProjectId}:${proposed_plan}`).digest('hex').slice(0, 8);
+  const isHumanAuthorized = human_override === true && override_token === expectedOverrideToken;
+
+  if (!isHumanAuthorized) {
+    const unverifiedToken = `TG-UNVERIFIED-FALLBACK-${crypto.randomBytes(6).toString('hex')}`;
+    logActivity('PLAN_VERIFIED_FALLBACK_BLOCKED', {
+      approved: false,
+      score: 0.0,
+      tier: 'LOCAL_FALLBACK',
+      receipt: unverifiedToken,
+      issues: localIssues
+    });
+
+    return {
+      approved: false,
+      score: 0.0,
+      tier: 'LOCAL_FALLBACK',
+      status: 'UNVERIFIED_FALLBACK',
+      requires_human_override: true,
+      message: 'STOP: Truth Guard is operating in LOCAL_FALLBACK mode (LLM offline or circuit breaker active). Local fallback mode is fail-closed and cannot cryptographically verify plan grounding without human authorization. Present this plan to the human user in chat. Once confirmed, re-run truth_verify_plan with human_override: true and override_token: "' + expectedOverrideToken + '".',
+      override_token: expectedOverrideToken,
+      hallucinations_or_missing_conditions: [
+        'Fail-Closed Fallback: Local offline mode cannot perform semantic fact verification.',
+        ...localIssues
+      ],
+      receipt_token: unverifiedToken
+    };
+  }
+
+  // If human override was explicitly provided and valid:
   const approved = localIssues.length === 0 && cited_fact_ids.length > 0;
   const score = approved ? 1.0 : 0.0;
   const planHash = crypto.createHash('sha256').update(proposed_plan).digest('hex').slice(0, 12);
-  const receiptToken = approved ? `TG-VERIFIED-LOCAL-${planHash}` : `TG-REJECTED-LOCAL-${crypto.randomBytes(6).toString('hex')}`;
+  const receiptToken = approved ? `TG-VERIFIED-OVERRIDE-${planHash}` : `TG-REJECTED-OVERRIDE-${crypto.randomBytes(6).toString('hex')}`;
 
   if (approved) {
     writeTruthReceipt({
@@ -919,10 +1097,10 @@ Strict verification rules:
     });
   }
 
-  logActivity('PLAN_VERIFIED_LOCAL', {
+  logActivity('PLAN_VERIFIED_LOCAL_OVERRIDE', {
     approved,
     score,
-    tier: 'LOCAL_FALLBACK',
+    tier: 'LOCAL_FALLBACK_HUMAN_OVERRIDE',
     receipt: receiptToken,
     issues: localIssues
   });
@@ -930,7 +1108,8 @@ Strict verification rules:
   return {
     approved,
     score,
-    tier: 'LOCAL_FALLBACK',
+    tier: 'LOCAL_FALLBACK_HUMAN_OVERRIDE',
+    status: approved ? 'APPROVED_BY_HUMAN_OVERRIDE' : 'REJECTED',
     hallucinations_or_missing_conditions: localIssues,
     receipt_token: receiptToken
   };
@@ -974,11 +1153,68 @@ export async function upsertRule({
     };
   }
 
-  // 2. Path traversal guard
+  // 2. Path traversal & Symlink guard
   const targetFile = path.resolve(rootDir, file_path);
   const rel = path.relative(rootDir, targetFile);
   if (rel.startsWith('..') || path.isAbsolute(file_path)) {
     throw new Error('Access denied: Path traversal detected. file_path must reside within the root directory.');
+  }
+
+  // Symlink Shield: verify real physical paths
+  let realRoot;
+  try {
+    realRoot = fs.realpathSync(rootDir);
+  } catch {
+    realRoot = path.resolve(rootDir);
+  }
+
+  if (fs.existsSync(targetFile)) {
+    try {
+      const realTarget = fs.realpathSync(targetFile);
+      const relToRealRoot = path.relative(realRoot, realTarget);
+      if (relToRealRoot.startsWith('..') || path.isAbsolute(relToRealRoot)) {
+        throw new Error('Access denied: Symlink escape detected. Target file resolves outside workspace root.');
+      }
+    } catch (e) {
+      if (e.message.includes('Symlink escape')) throw e;
+      throw new Error(`Access denied: Cannot resolve real path for target file: ${e.message}`);
+    }
+  } else {
+    let checkDir = path.dirname(targetFile);
+    while (!fs.existsSync(checkDir) && checkDir !== path.dirname(checkDir)) {
+      checkDir = path.dirname(checkDir);
+    }
+    if (fs.existsSync(checkDir)) {
+      try {
+        const realParent = fs.realpathSync(checkDir);
+        const relParentToRoot = path.relative(realRoot, realParent);
+        if (relParentToRoot.startsWith('..') || path.isAbsolute(relParentToRoot)) {
+          throw new Error('Access denied: Symlink escape detected in parent directory hierarchy.');
+        }
+      } catch (e) {
+        if (e.message.includes('Symlink escape')) throw e;
+        throw new Error(`Access denied: Cannot verify parent directory safety: ${e.message}`);
+      }
+    }
+  }
+
+  let currentSegment = targetFile;
+  while (currentSegment !== rootDir && currentSegment !== path.dirname(currentSegment)) {
+    if (fs.existsSync(currentSegment)) {
+      try {
+        const stat = fs.lstatSync(currentSegment);
+        if (stat.isSymbolicLink()) {
+          const resolvedLink = fs.realpathSync(currentSegment);
+          const relLink = path.relative(realRoot, resolvedLink);
+          if (relLink.startsWith('..') || path.isAbsolute(relLink)) {
+            throw new Error(`Access denied: Symbolic link segment detected pointing outside workspace: ${currentSegment}`);
+          }
+        }
+      } catch (e) {
+        if (e.message.includes('Access denied')) throw e;
+      }
+    }
+    currentSegment = path.dirname(currentSegment);
   }
 
   // 3. Sensitive path & file shield
@@ -1099,7 +1335,7 @@ function startWatcher(rootDir, projectId) {
 export function createTruthGuardServer() {
   const server = new McpServer({
     name: 'antigravity-truth-guard',
-    version: '2.0.0'
+    version: '2.1.0'
   });
 
   server.tool(
@@ -1124,11 +1360,20 @@ export function createTruthGuardServer() {
     {
       proposed_plan: z.string().min(1).max(50000).describe('The proposed technical plan, architecture changes, or code implementation details'),
       cited_fact_ids: z.array(z.string().max(250)).max(100).describe('Array of fact_id references retrieved from truth_search'),
-      target_files: z.array(z.string().max(500)).max(100).optional().describe('List of file paths intended to be created or modified'),
-      project_dir: z.string().max(1000).optional().describe('Optional absolute path to project root directory')
+      target_files: z.array(z.string().min(1).max(500)).min(1).max(100).describe('List of file paths intended to be created or modified (mandatory non-empty array)'),
+      project_dir: z.string().max(1000).optional().describe('Optional absolute path to project root directory (must reside in authorized workspace)'),
+      human_override: z.boolean().default(false).optional().describe('Whether human user explicitly authorized fallback verification when offline'),
+      override_token: z.string().optional().describe('Confirmation token provided by truth_verify_plan during fallback mode')
     },
-    async ({ proposed_plan, cited_fact_ids, target_files = [], project_dir }) => {
-      const verification = await verifyPlan({ proposed_plan, cited_fact_ids, target_files, project_dir });
+    async ({ proposed_plan, cited_fact_ids, target_files, project_dir, human_override = false, override_token = null }) => {
+      const verification = await verifyPlan({
+        proposed_plan,
+        cited_fact_ids,
+        target_files,
+        project_dir,
+        human_override,
+        override_token
+      });
       return {
         content: [{ type: 'text', text: JSON.stringify(verification, null, 2) }]
       };
