@@ -22,6 +22,7 @@
 7. [Quickstart & Deployment Guide](#-quickstart--deployment-guide)
 8. [Connecting to Antigravity, Claude, Codex, and Cursor](#-connecting-to-antigravity-claude-codex-and-cursor)
 9. [AI Agent Prompts Library](#-ai-agent-prompts-library)
+10. [How Verification and Scoring Work (Detailed Guide)](VERIFICATION_AND_SCORING.md)
 
 ---
 

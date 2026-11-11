@@ -22,6 +22,7 @@
 7. [Швидкий старт та розгортання](#-швидкий-старт-та-розгортання)
 8. [Підключення до Antigravity, Claude, Codex, Cursor](#-підключення-до-antigravity-claude-codex-cursor)
 9. [Готові промпти для ШІ-агентів (Prompts Library)](#-готові-промпти-для-ші-агентів-prompts-library)
+10. [Як влаштована верифікація та скорінг фактів (Посібник)](VERIFICATION_AND_SCORING.uk.md)
 
 ---
 
