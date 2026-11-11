@@ -15,7 +15,7 @@ for (const p of envPaths) {
   if (fs.existsSync(p)) dotenv.config({ path: p, override: false });
 }
 
-const HMAC_KEY = process.env.TRUTH_GUARD_HMAC_SECRET || process.env.GEMINI_API_KEY;
+const HMAC_KEY = process.env.TRUTH_GUARD_HMAC_SECRET;
 
 // 2. Strict TTY requirement: Must be executed by a human in an interactive terminal
 if (!process.stdin.isTTY) {
@@ -30,8 +30,8 @@ if (!process.stdin.isTTY) {
 
 if (!HMAC_KEY) {
   console.error('\n❌ [EMERGENCY OVERRIDE FAILED: MISSING HMAC SECRET]');
-  console.error('Neither TRUTH_GUARD_HMAC_SECRET nor GEMINI_API_KEY is configured.');
-  console.error('Please configure your secret in ~/.gemini/antigravity/truth-guard/.env');
+  console.error('TRUTH_GUARD_HMAC_SECRET is strictly required for emergency receipt signing.');
+  console.error('Please configure your secret in ~/.gemini/antigravity/truth-guard/.env\n');
   process.exit(1);
 }
 

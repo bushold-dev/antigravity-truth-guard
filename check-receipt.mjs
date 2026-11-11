@@ -14,7 +14,7 @@ for (const p of envPaths) {
   if (fs.existsSync(p)) dotenv.config({ path: p, override: false });
 }
 
-const HMAC_KEY = process.env.TRUTH_GUARD_HMAC_SECRET || process.env.GEMINI_API_KEY;
+const HMAC_KEY = process.env.TRUTH_GUARD_HMAC_SECRET;
 
 function detectCurrentProjectId(cwd) {
   const baseName = path.basename(cwd).replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
@@ -37,10 +37,11 @@ function checkTruthReceipt() {
   const cwd = process.cwd();
   console.log('[TRUTH GUARD] Verifying anti-hallucination compliance receipt...');
 
-  // Fail closed if HMAC secret is missing
+  // Fail closed if dedicated HMAC secret is missing
   if (!HMAC_KEY) {
     console.error('\n❌ [TRUTH GUARD AUDIT FAILED: MISSING HMAC SECRET]');
-    console.error('Neither TRUTH_GUARD_HMAC_SECRET nor GEMINI_API_KEY is configured in environment.');
+    console.error('TRUTH_GUARD_HMAC_SECRET is strictly required for cryptographic receipt verification.');
+    console.error('Receipt verification requires a dedicated secret, not GEMINI_API_KEY.\n');
     process.exit(1);
   }
 

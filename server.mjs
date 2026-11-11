@@ -810,9 +810,9 @@ export function writeTruthReceipt({ projectId, citedFactIds, proposedPlan, targe
     ? `${receiptToken}:${projectId}:${planHash}:${targetSorted}:${timestamp}:${citedSorted}`
     : `${receiptToken}:${projectId}:${planHash}:${timestamp}:${citedSorted}`;
 
-  const hmacKey = process.env.TRUTH_GUARD_HMAC_SECRET || GEMINI_API_KEY;
+  const hmacKey = process.env.TRUTH_GUARD_HMAC_SECRET;
   if (!hmacKey) {
-    throw new Error('Truth Guard HMAC secret is not configured. Set TRUTH_GUARD_HMAC_SECRET or GEMINI_API_KEY.');
+    throw new Error('Truth Guard HMAC secret is not configured. Dedicated TRUTH_GUARD_HMAC_SECRET is strictly required.');
   }
 
   const signature = crypto.createHmac('sha256', hmacKey).update(signatureData).digest('hex');
